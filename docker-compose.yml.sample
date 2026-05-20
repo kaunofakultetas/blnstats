@@ -115,7 +115,7 @@ services:
   # Database browser
   blnstats-dbgate:
     container_name: blnstats-dbgate
-    image: dbgate/dbgate:7.1.4-alpine
+    image: dbgate/dbgate:7.1.12-alpine
     read_only: false
     environment:
       WEB_ROOT: /dbgate
