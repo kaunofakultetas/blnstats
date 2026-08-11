@@ -1,3 +1,22 @@
+############################################################
+#  [*] Coefficients — BLN (de)centralization metrics
+#
+#  Pure-math layer of the stats pipeline. The chart/JSON
+#  flows in blnstats/__init__.py feed block-height
+#  snapshots in (VerticesAspectDataStructure — node/entity
+#  capacities or channel counts selected by
+#  NodeMetricsSelector / EntityMetricsSelector) and get a
+#  CoefficientsDataStructure back (data_types.py), which
+#  they save under /DATA/GENERATED/ and hand on to
+#  charts/chart_generator.py.
+#
+#  Every metric takes a list of non-negative values (one
+#  weight per node/entity); each method banner states the
+#  formula, value range and edge-case conventions.
+#  Unit tests: backend/tests/test_coefficients.py.
+############################################################
+
+
 import numpy as np
 import math
 from datetime import datetime
@@ -7,38 +26,62 @@ from ..data_types import VerticesAspectDataStructure, CoefficientsDataStructure
 
 
 
+
+
+
+############################################################
+# Coefficients
+############################################################
+#
+# Stateless calculator for concentration/inequality
+# metrics over one snapshot of node or entity weights:
+#
+#   Gini                     0 decentralized .. 1 central.
+#   HHI                      0 .. 10000
+#   Theil / NormalizedTheil  0 .. ln(n)  /  0 .. 1
+#   ShannonEntropy (+ norm.) 0 centralized .. log2(n) / 1
+#                            — direction OPPOSITE to the
+#                            metrics above
+#   Nakamoto                 min holders reaching 51%
+#   Top10PercentControl...   share / raw sum of the top 10%
+#
+# calculate_coefficient dispatches by name; details live
+# in the method banners below.
+#
+# Used by:
+#   - generateCoefficientCharts,
+#     generateOverlappingCoefficientCharts,
+#     generateCoefficientsOnSingleChart,
+#     generateLorenzCharts (blnstats/__init__.py) — all
+#     through calculate_on_vertices_data
+#   - tests/test_coefficients.py — direct method calls
+############################################################
+
 class Coefficients:
-    """
-    Class for calculating various centralization and decentralization coefficients.
-
-    This class provides methods to compute different statistical measures that help
-    assess the degree of centralization or decentralization in a network, for example
-    analyzing BLN node capacities or channel distributions.
-
-    Coefficients calculated:
-    1. Gini Coefficient: Measures inequality (0.0 - Decentralized, 1.0 - Centralized)
-    2. Herfindahl-Hirschman Index (HHI): Measures market concentration (0.0 - Decentralized, 10000.0 - Centralized)
-    3. Theil Index: Measures inequality with sensitivity to differences (0.0 - Decentralized, Higher - More Centralized)
-    4. Normalized Theil Index: Theil Index normalized to [0, 1] range
-    5. Shannon Entropy: Measures diversity and unpredictability (0.0 - Centralized, Higher - More Decentralized)
-    6. Normalized Shannon Entropy: Shannon Entropy normalized to [0, 1] range
-    7. Nakamoto Coefficient: Measures minimum entities to reach 51% of the total (1 - Centralized, Higher - More Decentralized)
-    8. Top 10 Percent Control Total Percentage: Measures percentage of the total network that top 10% of the nodes/entities have control over
-    9. Top 10 Percent Control Sum: Measures sum of values that top 10% of the nodes/entities have
-
-    Each method takes a list of non-negative integer values representing nodes/entities capacities
-    or channel counts and returns the corresponding coefficient value.
-    """
 
 
+
+
+
+
+    ############################################################
+    # calculate_gini
+    ############################################################
+    #
+    # Gini via the sorted-index identity:
+    #   G = sum_i((2i - n - 1) * x_(i)) / (n * sum(x)),
+    # x sorted ascending, i = 1..n. 0 means a perfectly
+    # even split; the maximum (n-1)/n approaches 1 when one
+    # holder has everything. Empty and all-zero input
+    # return 0.0 by convention (Gini is undefined there);
+    # negatives raise ValueError.
+    #
+    # Used by:
+    #   - calculate_coefficient (below, "Gini")
+    #   - tests/test_coefficients.py
+    ############################################################
 
     def calculate_gini(self, data: list) -> float:
-        """
-        Calculate the Gini Coefficient for the given data.
-
-        :param data: List[int] - Array of non-negative integer values representing nodes/entities capacities or channel counts
-        :return: float - Gini value (0.0 - Decentralized, 1.0 - Centralized)
-        """
         n = len(data)
         if n == 0:
             return 0.0
@@ -50,23 +93,34 @@ class Coefficients:
         sorted_data = np.sort(data)
         sum_data = np.sum(sorted_data)
         if sum_data == 0:
-            return 0.0  # All values are zero; Gini is not defined, so return 0
+            return 0.0
 
         index = np.arange(1, n + 1)
         gini_numerator = np.sum((2 * index - n - 1) * sorted_data)
         gini_denominator = n * sum_data
         gini = gini_numerator / gini_denominator
         return gini
-    
 
+
+
+
+
+
+    ############################################################
+    # calculate_hhi
+    ############################################################
+    #
+    # Herfindahl-Hirschman Index on the market-share scale:
+    #   HHI = 10000 * sum_i((x_i / total)^2).
+    # 10000/n for a uniform split, 10000 for a monopoly.
+    # Zero total returns 0.0; negatives raise ValueError.
+    #
+    # Used by:
+    #   - calculate_coefficient (below, "HHI")
+    #   - tests/test_coefficients.py
+    ############################################################
 
     def calculate_hhi(self, data: list) -> float:
-        """
-        Calculate the Herfindahl-Hirschman Index (HHI) for the given data.
-
-        :param data: List[int] - Array of non-negative integer values representing nodes/entities capacities or channel counts
-        :return: float - HHI value (0.0 - Decentralized, 10000.0 - Centralized)
-        """
         total = sum(data)
         if total == 0:
             return 0.0
@@ -78,16 +132,32 @@ class Coefficients:
         shares = data / total
         hhi = np.sum(shares ** 2) * 10000
         return hhi
-    
 
+
+
+
+
+
+    ############################################################
+    # calculate_theil_index
+    ############################################################
+    #
+    # Theil T index in share form:
+    #   T = sum_i(s_i * ln(s_i * n)),  s_i = x_i / total,
+    # with n the FULL entry count (zeros included). 0 for a
+    # uniform split, ln(n) when one holder has everything.
+    # Zero shares are dropped before the log — their
+    # contribution tends to 0 anyway and it keeps log() off
+    # zero. Empty or zero-total input returns 0.0;
+    # negatives raise ValueError.
+    #
+    # Used by:
+    #   - calculate_normalized_theil_index (below)
+    #   - calculate_coefficient (below, "Theil")
+    #   - tests/test_coefficients.py
+    ############################################################
 
     def calculate_theil_index(self, data: list) -> float:
-        """
-        Calculate the Theil Index for the given data.
-
-        :param data: List[int] - Array of non-negative integer values representing nodes/entities capacities or channel counts
-        :return: float - Theil Index value (0.0 - Decentralized, Higher Value - More Centralized)
-        """
         n = len(data)
         total = sum(data)
         if n == 0 or total == 0:
@@ -98,33 +168,56 @@ class Coefficients:
             raise ValueError("All data values must be non-negative.")
 
         shares = data / total
-        shares = shares[shares > 0]  # Exclude zero shares to avoid log(0)
+        shares = shares[shares > 0]
 
         theil = np.sum(shares * np.log(shares * n))
         return theil
 
 
 
-    def calculate_max_theil_index(self, n: int) -> float:
-        """
-        Calculate the maximum possible Theil Index for n elements.
 
-        :param n: int - Number of elements
-        :return: float - Maximum Theil Index value
-        """
+
+
+    ############################################################
+    # calculate_max_theil_index
+    ############################################################
+    #
+    # Upper bound of Theil T for n holders: ln(n), reached
+    # when one holder has everything. n <= 1 returns 0.0 —
+    # a single holder has no inequality to measure.
+    #
+    # Used by:
+    #   - calculate_normalized_theil_index (below)
+    #   - tests/test_coefficients.py
+    ############################################################
+
+    def calculate_max_theil_index(self, n: int) -> float:
         if n <= 1:
             return 0.0
         return math.log(n)
 
 
 
-    def calculate_normalized_theil_index(self, data) -> float:
-        """
-        Calculate the Normalized Theil Index for the given data.
 
-        :param data: List[int] - Array of non-negative integer values representing nodes/entities capacities or channel counts
-        :return: float - Normalized Theil Index value (0.0 - Decentralized, 1.0 - Centralized)
-        """
+
+
+    ############################################################
+    # calculate_normalized_theil_index
+    ############################################################
+    #
+    # T / ln(n): rescales Theil to 0 (decentralized) .. 1
+    # (centralized) so snapshots of different sizes
+    # compare. n counts ALL entries including zero-valued
+    # ones — consistent with calculate_theil_index, which
+    # uses the unfiltered length inside its log. n <= 1
+    # returns 0.0 (max_theil guard).
+    #
+    # Used by:
+    #   - calculate_coefficient (below, "NormalizedTheil")
+    #   - tests/test_coefficients.py
+    ############################################################
+
+    def calculate_normalized_theil_index(self, data) -> float:
         theil_index = self.calculate_theil_index(data)
         max_theil = self.calculate_max_theil_index(len(data))
         if max_theil == 0:
@@ -135,13 +228,28 @@ class Coefficients:
 
 
 
-    def calculate_shannon_entropy(self, data) -> float:
-        """
-        Calculate the Shannon Entropy Index for the given data.
 
-        :param data: List[int] - Array of non-negative integer values representing nodes/entities capacities or channel counts
-        :return: float - Shannon Entropy value (0.0 - Centralized, Higher Value - More Decentralized)
-        """
+
+
+    ############################################################
+    # calculate_shannon_entropy
+    ############################################################
+    #
+    # Shannon entropy in bits over the share distribution:
+    #   H = -sum_i(s_i * log2(s_i)),  s_i = x_i / total.
+    # 0 when one holder has everything (centralized),
+    # log2(n) for a uniform split — the direction is
+    # OPPOSITE to Gini/HHI/Theil. Zero shares are dropped
+    # (log2(0) guard); zero total returns 0.0; negatives
+    # raise ValueError.
+    #
+    # Used by:
+    #   - calculate_normalized_shannon_entropy (below)
+    #   - calculate_coefficient (below, "ShannonEntropy")
+    #   - tests/test_coefficients.py
+    ############################################################
+
+    def calculate_shannon_entropy(self, data) -> float:
         total = sum(data)
         if total == 0:
             return 0.0
@@ -151,33 +259,54 @@ class Coefficients:
             raise ValueError("All data values must be non-negative.")
 
         shares = data / total
-        shares = shares[shares > 0]  # Exclude zero shares to avoid log(0)
+        shares = shares[shares > 0]
 
         entropy = -np.sum(shares * np.log2(shares))
         return entropy
 
 
 
-    def calculate_max_shannon_entropy(self, n) -> float:
-        """
-        Calculate the maximum possible Shannon Entropy for n elements.
 
-        :param n: int - Number of elements
-        :return: float - Maximum Shannon Entropy value
-        """
+
+
+    ############################################################
+    # calculate_max_shannon_entropy
+    ############################################################
+    #
+    # Upper bound of H for n holders: log2(n), reached on a
+    # perfectly uniform split. n <= 1 returns 0.0.
+    #
+    # Used by:
+    #   - calculate_normalized_shannon_entropy (below)
+    #   - tests/test_coefficients.py
+    ############################################################
+
+    def calculate_max_shannon_entropy(self, n) -> float:
         if n <= 1:
             return 0.0
         return math.log2(n)
 
 
 
-    def calculate_normalized_shannon_entropy(self, data) -> float:
-        """
-        Calculate the Normalized Shannon Entropy Index for the given data.
 
-        :param data: List[int] - Array of non-negative integer values representing nodes/entities capacities or channel counts
-        :return: float - Normalized Shannon Entropy value (0.0 - Centralized, 1.0 - Decentralized)
-        """
+
+
+    ############################################################
+    # calculate_normalized_shannon_entropy
+    ############################################################
+    #
+    # H / log2(n), rescaled to 0 (centralized) .. 1
+    # (perfectly even). n counts ALL entries including
+    # zero-valued ones; n <= 1 returns 0.0 (max_entropy
+    # guard).
+    #
+    # Used by:
+    #   - calculate_coefficient (below,
+    #     "NormalizedShannonEntropy")
+    #   - tests/test_coefficients.py
+    ############################################################
+
+    def calculate_normalized_shannon_entropy(self, data) -> float:
         shannon_entropy = self.calculate_shannon_entropy(data)
         max_entropy = self.calculate_max_shannon_entropy(len(data))
         if max_entropy == 0:
@@ -188,74 +317,135 @@ class Coefficients:
 
 
 
-    def calculate_nakamoto(self, data) -> int:
-        """
-        Calculate the Nakamoto Coefficient for the given data.
 
-        :param data: List[int] - Array of non-negative integer values representing nodes/entities capacities or channel counts
-        :return: int - Nakamoto Coefficient value (1 - Centralized, Higher Value - More Decentralized)
-        """
+
+
+    ############################################################
+    # calculate_nakamoto
+    ############################################################
+    #
+    # Nakamoto coefficient: the smallest k such that the k
+    # largest holders together reach the 51% threshold —
+    # searchsorted(cumsum(descending shares), 0.51) + 1.
+    #
+    # NOTE (definition quirk, documented not fixed): the
+    # textbook definition is "strictly more than 50%"; the
+    # fixed 0.51 cutoff overcounts by one when the top k
+    # hold between 50% and 51%. Zero total returns 0 even
+    # though 1 is the documented minimum (undefined case).
+    # Negatives raise ValueError.
+    #
+    # Used by:
+    #   - calculate_coefficient (below, "Nakamoto")
+    #   - tests/test_coefficients.py
+    ############################################################
+
+    def calculate_nakamoto(self, data) -> int:
         data = np.array(data, dtype=np.float64)
         if np.any(data < 0):
             raise ValueError("All data values must be non-negative.")
 
         total = np.sum(data)
         if total == 0:
-            return 0  # No capacity; Nakamoto coefficient is undefined
+            return 0
 
-        sorted_data = np.sort(data)[::-1]  # Sort in descending order
+        sorted_data = np.sort(data)[::-1]
         cumulative_share = np.cumsum(sorted_data) / total
 
-        # Find the smallest number of nodes that cumulatively have more than 51% share
+        # searchsorted finds the first index whose cumulative
+        # share reaches 0.51; +1 turns the index into a count
         nodes_needed = np.searchsorted(cumulative_share, 0.51) + 1
         return nodes_needed
 
 
 
-    def calculate_top_10_percent_control_percentage(self, data) -> float:
-        """
-        Calculate percentage of the total network that top 10% of the nodes/entities have control over.
 
-        :param data: List[int] - Array of non-negative integer values representing nodes/entities capacities or channel counts
-        :return: float - Percentage of the total network that top 10% of the nodes/entities have control over
-        """
+
+
+    ############################################################
+    # calculate_top_10_percent_control_percentage
+    ############################################################
+    #
+    # Share of the total held by the top 10% of holders:
+    # sort descending, take the first floor(n * 0.1)
+    # entries, divide their sum by the grand total. Despite
+    # the name it returns a FRACTION in [0, 1], not 0-100.
+    #
+    # BUG (documented, not fixed): unlike the other metrics
+    # there is no zero-total guard — an all-zero snapshot
+    # divides 0/0 and returns numpy nan. Also floor(n*0.1)
+    # is 0 for n < 10, yielding 0.0 regardless of actual
+    # concentration.
+    #
+    # Used by:
+    #   - calculate_coefficient (below,
+    #     "Top10PercentControlPercentage")
+    #   - nothing tests this at the moment
+    ############################################################
+
+    def calculate_top_10_percent_control_percentage(self, data) -> float:
         data = np.array(data, dtype=np.float64)
         if np.any(data < 0):
             raise ValueError("All data values must be non-negative.")
 
-        # Sort in descending order using [::-1]
         sorted_data = np.sort(data)[::-1]
         ten_percent_index = int(0.1 * len(sorted_data))
         return np.sum(sorted_data[:ten_percent_index]) / np.sum(sorted_data)
-    
 
+
+
+
+
+
+    ############################################################
+    # calculate_top_10_percent_control_sum
+    ############################################################
+    #
+    # Raw sum of the values held by the top 10% of holders
+    # — same floor(n * 0.1) cut as the percentage variant,
+    # including its n < 10 -> 0.0 edge. The unit is
+    # whatever the input carries: satoshis for capacity,
+    # channels for degree.
+    #
+    # Used by:
+    #   - calculate_coefficient (below,
+    #     "Top10PercentControlSum")
+    #   - nothing tests this at the moment
+    ############################################################
 
     def calculate_top_10_percent_control_sum(self, data) -> float:
-        """
-        Calculate sum of values that top 10% of the nodes/entities have.
-
-        :param data: List[int] - Array of non-negative integer values representing nodes/entities capacities or channel counts
-        :return: float - Sum of values that top 10% of the nodes/entities have
-        """
         data = np.array(data, dtype=np.float64)
         if np.any(data < 0):
             raise ValueError("All data values must be non-negative.")
 
-        # Sort in descending order using [::-1]
         sorted_data = np.sort(data)[::-1]
         ten_percent_index = int(0.1 * len(sorted_data))
         return np.sum(sorted_data[:ten_percent_index])
 
 
 
-    def calculate_coefficient(self, values: list, coefficient_type: str) -> float:
-        """
-        Calculate the coefficient for the given values and coefficient type.
 
-        :param values: List[int] - Array of non-negative integer values representing nodes/entities capacities or channel counts
-        :param coefficient_type: str - Type of coefficient to calculate
-        :return: float - Coefficient value
-        """
+
+
+    ############################################################
+    # calculate_coefficient
+    ############################################################
+    #
+    # Name -> method dispatcher. The names are the
+    # UI-facing coefficient types with spaces stripped
+    # (callers do coefficientType.replace(" ", "")):
+    # "Gini", "HHI", "Theil", "NormalizedTheil",
+    # "ShannonEntropy", "NormalizedShannonEntropy",
+    # "Nakamoto", "Top10PercentControlPercentage",
+    # "Top10PercentControlSum" — anything else raises
+    # ValueError.
+    #
+    # Used by:
+    #   - calculate_on_vertices_data (below) — once per
+    #     block height
+    ############################################################
+
+    def calculate_coefficient(self, values: list, coefficient_type: str) -> float:
         if coefficient_type == "Gini":
             return self.calculate_gini(values)
         elif coefficient_type == "HHI":
@@ -280,17 +470,30 @@ class Coefficients:
 
 
 
+
+
+    ############################################################
+    # calculate_on_vertices_data
+    ############################################################
+    #
+    # Runs one coefficient over every block-height snapshot
+    # of a VerticesAspectDataStructure and wraps the series
+    # in a CoefficientsDataStructure — per height: value,
+    # date, timestamp, plus the input length/sum so
+    # consumers can judge sample size. The meta description
+    # is derived by parsing the input's yAxis label, e.g.
+    # "List(NodeID,Capacity)".
+    #
+    # Used by:
+    #   - generateCoefficientCharts,
+    #     generateOverlappingCoefficientCharts,
+    #     generateCoefficientsOnSingleChart,
+    #     generateLorenzCharts (blnstats/__init__.py)
+    ############################################################
+
     def calculate_on_vertices_data(self, vertices_data: VerticesAspectDataStructure, coefficient_type: str) -> CoefficientsDataStructure:
-        """
-        Calculate the Gini Coefficient for the given vertices aspect data and return it in coefficients structure.
-
-        :param vertices_data: VerticesAspectDataStructure - Data structure containing node capacities or channel counts
-        :param coefficient_type: str - Type of coefficient to calculate
-        :return: CoefficientsDataStructure - Structure containing coefficient values for each block height
-        """
-
-
-        # Calculate the coefficient for each block height
+        # STEP 1: run the metric on every block-height snapshot
+        # =====================================================
         coefficient_data = {}
         for block_height, vertice_entry in vertices_data.data.items():
             date = vertice_entry.date
@@ -304,8 +507,11 @@ class Coefficients:
             }
 
 
-
-        # Formulate the description of the data for the meta section
+        # STEP 2: derive the human description from the input's
+        # yAxis label — brittle parse assuming the exact shape
+        # "List(<subject>,<metric>)"; unmapped names surface as
+        # "UNKNOWN ..." in the description instead of failing
+        # =====================================================
         input_y_axis = vertices_data.meta.yAxis.split("(")[1].split(")")[0]
         input_subject, input_metric = input_y_axis.split(",")
 
@@ -322,14 +528,16 @@ class Coefficients:
         analysisMetric = METRIC_MAPPING.get(input_metric, "UNKNOWN METRIC")
 
 
-
-        # Pass through the yAxisSupplyChain and append the input yAxis
+        # STEP 3: extend the provenance trail — the input yAxis
+        # is appended so consumers see every transformation the
+        # series went through
+        # =====================================================
         yAxisSupplyChain = vertices_data.meta.yAxisSupplyChain.copy()
         yAxisSupplyChain.append(vertices_data.meta.yAxis)
 
 
-
-        # Return the coefficients data structure
+        # STEP 4: assemble the coefficients structure
+        # ===========================================
         return CoefficientsDataStructure(
             meta={
                 "type": f"CoefficientsAcrossTheTime({coefficient_type})",
@@ -347,7 +555,3 @@ class Coefficients:
                 input_array_sum=sum([vertice.value for vertice in vertices_data.data[block_height].vertices])
             ) for block_height in coefficient_data.keys()}
         )
-
-
-
-

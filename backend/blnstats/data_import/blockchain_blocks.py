@@ -1,3 +1,31 @@
+############################################################
+#  [*] Blockchain blocks — height/hash/time index import
+#
+#  Mirrors the Bitcoin block index into Blockchain_Blocks:
+#  for every height it fetches the 80-byte block header from
+#  Electrum, hashes it into the block hash and lifts the
+#  timestamp straight out of the raw bytes. The table is the
+#  height -> date lookup the rest of the system leans on.
+#
+#  Neighbours: driven only by synchronizeBlockchain() in
+#  blnstats/__init__.py, which runs it before AND after the
+#  transaction import in blockchain_transactions.py so that
+#  freshly referenced blocks exist; Blockchain_Blocks flows
+#  on to database/raw_data_selector.py (first block of each
+#  day), calculations/general_stats.py and
+#  data_import/compare_sources.py.
+#
+#  Wire-format ground rules used throughout:
+#    - Electrum speaks newline-delimited JSON-RPC over a
+#      plain TCP socket (no TLS)
+#    - a block header is EXACTLY 80 bytes; its hash is
+#      double-sha256 of those bytes, byte-reversed into
+#      display order
+#    - the timestamp is a 4-byte little-endian UNIX time at
+#      header offset 68
+############################################################
+
+
 import logging
 import socket
 import json
@@ -9,7 +37,11 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Dict
 
-# Configure logging
+# NOTE: `dataclass` and `List` are imported above but never
+# used anywhere in this module — dead imports.
+
+# basicConfig at import time: whichever blnstats module is
+# imported first wins the root-logger configuration.
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -17,9 +49,47 @@ logger = logging.getLogger(__name__)
 
 
 
+
+
+
+############################################################
+# BlockSyncError
+############################################################
+#
+# Terminal failure signal of a block sync: raised once at
+# the end of BlockchainBlocks.sync_blocks() when heights are
+# still failing after every retry round. Carries the
+# height -> error map so the log shows exactly which blocks
+# never landed. Also raised as BlockSyncError({}, 0) when
+# the chain tip cannot be fetched at all.
+#
+# Used by:
+#   - BlockchainBlocks.sync_blocks (below) — the only raise
+#     site; nothing catches it upstream, so it aborts the
+#     --sync-blockchain CLI run / synchronize_blockchain
+#     workflow task
+############################################################
+
 class BlockSyncError(Exception):
-    """Exception raised when blocks fail to sync after all retry attempts."""
-    
+
+
+
+
+
+
+    ############################################################
+    # __init__
+    ############################################################
+    #
+    # Builds the message eagerly so a bare str(exc) in the
+    # workflow log already names every failed height. NOTE:
+    # for the empty tip-fetch case the message misleadingly
+    # reads "Failed to sync 0 out of 0 blocks".
+    #
+    # Used by:
+    #   - BlockchainBlocks.sync_blocks (below)
+    ############################################################
+
     def __init__(self, failed_blocks: Dict[int, str], total_blocks_attempted: int):
         self.failed_blocks = failed_blocks
         self.total_blocks_attempted = total_blocks_attempted
@@ -30,6 +100,31 @@ class BlockSyncError(Exception):
         super().__init__(message)
 
 
+
+
+
+
+
+
+############################################################
+# send_electrum_request
+############################################################
+#
+# One Electrum JSON-RPC call over a fresh plain TCP socket
+# (newline-delimited JSON, no TLS). Reads until the first
+# chunk containing a LF — safe because Electrum answers a
+# single request with a single LF-terminated line. Returns
+# the 'result' payload, or None on any network/protocol
+# error (errors are logged, never raised). NOTE: this is a
+# near-duplicate of the private __send_electrum_request in
+# blockchain_transactions.py — fix bugs in both places. The
+# socket is only closed on the happy path; an exception
+# mid-request leaks the descriptor until the GC collects it.
+#
+# Used by:
+#   - retrieve_and_write_blockchain_block (below)
+#   - BlockchainBlocks.sync_blocks (below)
+############################################################
 
 def send_electrum_request(server_ip: str, server_port: int, method: str, params: list):
     try:
@@ -55,11 +150,12 @@ def send_electrum_request(server_ip: str, server_port: int, method: str, params:
                 break
         s.close()
 
-        # Construct response and parse as JSON
+        # one LF-terminated JSON line is the whole reply
         response = b''.join(chunks).decode()
         response_json = json.loads(response)
-        
-        # Safely check for errors
+
+        # a JSON-RPC error object means the call failed even
+        # though the socket read succeeded — log and swallow
         if isinstance(response_json, dict) and 'error' in response_json and response_json['error']:
             error_info = response_json['error']
             if isinstance(error_info, dict) and 'message' in error_info:
@@ -76,6 +172,23 @@ def send_electrum_request(server_ip: str, server_port: int, method: str, params:
 
 
 
+
+
+
+
+
+############################################################
+# get_block_hash_from_header
+############################################################
+#
+# 80-byte header hex -> block hash: sha256(sha256(header)),
+# byte-reversed into the display order used by explorers and
+# stored in the BlockHash column.
+#
+# Used by:
+#   - retrieve_and_write_blockchain_block (below)
+############################################################
+
 def get_block_hash_from_header(header_hex: str) -> str:
     header_bytes = bytes.fromhex(header_hex)
     hash1 = hashlib.sha256(header_bytes).digest()
@@ -84,34 +197,65 @@ def get_block_hash_from_header(header_hex: str) -> str:
 
 
 
-def retrieve_and_write_blockchain_block(args):
-    """
-    Retrieves block data from the Electrum server and writes it to the database.
 
-    :param args: Tuple containing (height, electrum_credentials)
-    :return: Tuple of (height, success_status, error_message)
-    """
+
+
+
+
+############################################################
+# retrieve_and_write_blockchain_block
+############################################################
+#
+# Worker for ONE block height, run through the thread pool
+# in sync_blocks. Sits at module level (with args packed as
+# a (height, credentials) tuple) so pool.map can call it.
+# Fetches the raw header, derives hash and timestamp locally
+# — no further Electrum round-trips — and upserts one
+# Blockchain_Blocks row. Never raises: always returns
+# (height, success, error_message) so the pool result set is
+# uniform and sync_blocks can retry just the failures.
+#
+# GOTCHA: datetime.fromtimestamp() converts the UTC block
+# timestamp using the SERVER-LOCAL timezone — the Time and
+# Date columns shift with the container's TZ setting.
+#
+# Used by:
+#   - BlockchainBlocks.sync_blocks (below) — pool.map over
+#     the missing heights
+############################################################
+
+def retrieve_and_write_blockchain_block(args):
     height, electrum_credentials = args
     electrum_host = electrum_credentials['host']
     electrum_port = electrum_credentials['port']
 
     try:
+        # STEP 1: fetch the raw 80-byte header for this height
+        # ====================================================
         raw_header = send_electrum_request(electrum_host, electrum_port, 'blockchain.block.header', [height])
         if not raw_header:
             logger.error(f"Could not retrieve header for block {height}")
             return (height, False, "Could not retrieve header")
 
+
+        # STEP 2: derive everything locally — the block hash by
+        # double-sha256, the timestamp from the 4-byte
+        # little-endian field at header offset 68
+        # =====================================================
         block_hash = get_block_hash_from_header(raw_header)
 
-        # The block header is an 80-byte structure.
-        # The timestamp is a 4-byte little-endian integer located at bytes 68-71.
         header_bytes = bytes.fromhex(raw_header)
         timestamp = int.from_bytes(header_bytes[68:72], 'little')
 
+        # server-local TZ conversion — see the GOTCHA in the banner
         dt_object = datetime.fromtimestamp(timestamp)
         human_readable_time = dt_object.strftime('%Y-%m-%d %H:%M:%S')
         human_readable_date = human_readable_time.split()[0]
 
+
+        # STEP 3: upsert, so re-syncs and reorg refreshes stay
+        # idempotent
+        # ====================================================
         with get_db_connection() as db_conn:
             with db_conn.cursor() as db_cursor:
                 db_cursor.execute('''
@@ -141,19 +285,50 @@ def retrieve_and_write_blockchain_block(args):
 
 
 
-class BlockchainBlocks:
-    """
-    Class to handle importing blockchain block data into the database.
-    """
 
+
+
+
+
+############################################################
+# BlockchainBlocks
+############################################################
+#
+# Importer that keeps the local Bitcoin block index
+# complete: finds every height missing from
+# Blockchain_Blocks up to the current chain tip and fills
+# the gaps through a small thread pool. Patient by design —
+# up to 120 retry rounds, 60 s apart, per 10000-block batch
+# — so an unattended sync survives long Electrum outages.
+#
+# Used by:
+#   - synchronizeBlockchain() in blnstats/__init__.py — the
+#     only constructor call; invoked twice per sync (before
+#     and after the transaction import) and reached from
+#     main.py --sync-blockchain and the
+#     synchronize_blockchain task in workflows.py
+############################################################
+
+class BlockchainBlocks:
+
+
+
+
+
+
+    ############################################################
+    # __init__
+    ############################################################
+    #
+    # Stores the Electrum endpoint and makes sure the target
+    # table exists. No Electrum connection is opened here —
+    # every request later dials a fresh socket.
+    #
+    # Used by:
+    #   - synchronizeBlockchain() in blnstats/__init__.py
+    ############################################################
 
     def __init__(self, electrum_host: str, electrum_port: int):
-        """
-        Initializes the BlockchainBlocks class with Electrum server credentials.
-
-        :param electrum_host: Electrum server IP address.
-        :param electrum_port: Electrum server port.
-        """
         self.electrum_host = electrum_host
         self.electrum_port = electrum_port
 
@@ -162,10 +337,24 @@ class BlockchainBlocks:
 
 
 
+
+
+    ############################################################
+    # __create_tables_if_not_exist
+    ############################################################
+    #
+    # DDL for Blockchain_Blocks: one row per height with the
+    # block hash, the raw UNIX timestamp and its
+    # (server-local) DATETIME / DATE renderings. NOTE:
+    # database/utils.py create_tables_if_not_exists() carries
+    # a second, equivalent copy of this DDL — keep the two in
+    # step.
+    #
+    # Used by:
+    #   - __init__ (above)
+    ############################################################
+
     def __create_tables_if_not_exist(self):
-        """
-        Creates the Blockchain_Blocks table if it does not exist.
-        """
         with get_db_connection() as db_conn:
             with db_conn.cursor() as db_cursor:
                 db_cursor.execute('''
@@ -184,39 +373,68 @@ class BlockchainBlocks:
 
 
 
+
+
+
+    ############################################################
+    # sync_blocks
+    ############################################################
+    #
+    # Batch driver: walks 0..chain-tip in 10000-block
+    # batches, asks the DB which heights already exist, and
+    # pushes only the missing ones through a 4-thread pool
+    # (ThreadPool from multiprocessing.dummy — threads, not
+    # processes, despite the variable name). Raises
+    # BlockSyncError when heights remain failed after all
+    # retry rounds, or immediately (as BlockSyncError({}, 0))
+    # when the chain tip cannot be fetched.
+    #
+    # BUG (documented, not fixed): as in
+    # BlockchainTransactions.run, exhausting the retry budget
+    # purely through POOL-level exceptions leaves
+    # all_failed_blocks empty — the sync then ends WITHOUT
+    # raising despite permanently missing blocks.
+    #
+    # Used by:
+    #   - synchronizeBlockchain() in blnstats/__init__.py —
+    #     twice per sync (before and after the transaction
+    #     import)
+    ############################################################
+
     def sync_blocks(self):
-        """
-        Syncs missing blocks from the Electrum server into the database.
-        
-        :raises BlockSyncError: If any blocks fail to sync after all retry attempts
-        """
-        # Get the latest block height from the Electrum server
+        # STEP 1: current chain tip via headers.subscribe (the
+        # reply also carries the tip header; only the height is
+        # used)
+        # =====================================================
         latest_header = send_electrum_request(self.electrum_host, self.electrum_port, 'blockchain.headers.subscribe', [])
         if not latest_header:
             logger.error("Could not get latest block from Electrum server.")
             raise BlockSyncError({}, 0)
         latest_blockchain_height = latest_header['height']
 
+        # packed per task because the worker is a module-level
+        # function, not a method
         electrum_credentials = {
             'host': self.electrum_host,
             'port': self.electrum_port
         }
 
-        processes = 4  # Number of worker processes
-        batch_size = 10000  # Number of blocks to process in each batch
-        max_retries = 120  # Maximum number of retries for failed blocks
-        retry_delay = 60  # Delay in seconds before retrying failed blocks
-        
-        # Track overall sync results
+        processes = 4  # ThreadPool size — threads, not processes
+        batch_size = 10000
+        max_retries = 120  # very patient: up to 120 x 60 s = 2 h per batch
+        retry_delay = 60  # seconds between retry rounds
+
         all_failed_blocks = {}  # height -> error_message
         total_blocks_attempted = 0
 
-        # Iterate over the entire range of block heights in batches
+
+        # STEP 2: walk the whole chain in 10000-block batches
+        # ===================================================
         for batch_start in range(0, latest_blockchain_height + 1, batch_size):
             batch_end = min(batch_start + batch_size - 1, latest_blockchain_height)
             all_heights = list(range(batch_start, batch_end + 1))
 
-            # Get existing BlockHeights in the batch from the database
+            # STEP 2.1: heights already present in this batch
             with get_db_connection() as db_conn:
                 with db_conn.cursor() as db_cursor:
                     db_cursor.execute('''
@@ -226,7 +444,7 @@ class BlockchainBlocks:
                     existing_blocks = db_cursor.fetchall()
                     existing_heights = set(row[0] for row in existing_blocks)
 
-            # Determine missing block heights in the batch
+            # STEP 2.2: the gap list — normally empty except near the tip
             missing_heights = [height for height in all_heights if height not in existing_heights]
 
             if not missing_heights:
@@ -236,21 +454,21 @@ class BlockchainBlocks:
             logger.info(f"Syncing missing blocks {missing_heights[0]} to {missing_heights[-1]} in batch {batch_start} to {batch_end}")
             total_blocks_attempted += len(missing_heights)
 
-            # Track failed blocks for retry
+            # STEP 2.3: 4-thread pool; each retry round reruns only the failures
             blocks_to_process = missing_heights
             retry_count = 0
-            
+
             while blocks_to_process and retry_count < max_retries:
                 tasks = [(height, electrum_credentials) for height in blocks_to_process]
-                
+
                 try:
                     with ThreadPool(processes) as pool:
                         results = pool.map(retrieve_and_write_blockchain_block, tasks)
-                    
-                    # Process results and identify failed blocks
+
+                    # STEP 2.4: split the uniform (height, ok, err) results
                     successful_blocks = []
                     failed_blocks = []
-                    
+
                     for height, success, error_msg in results:
                         if success:
                             successful_blocks.append(height)
@@ -266,7 +484,11 @@ class BlockchainBlocks:
                             logger.info(f"Waiting {retry_delay} seconds before retrying {len(blocks_to_process)} failed blocks...")
                             time.sleep(retry_delay)
                         else:
-                            # Log permanently failed blocks and add to overall tracking
+                            # last round — record as permanently failed.
+                            # NOTE: blocks_to_process is NOT trimmed here,
+                            # so the count logged after the loop is the
+                            # number that ENTERED this round, not the
+                            # number that actually failed in it
                             for height, error_msg in failed_blocks:
                                 logger.error(f"Block {height} permanently failed after {max_retries} attempts: {error_msg}")
                                 all_failed_blocks[height] = error_msg
@@ -274,21 +496,29 @@ class BlockchainBlocks:
                         blocks_to_process = []  # All blocks successful
                         
                 except Exception as e:
+                    # BUG (documented, not fixed): if the retry budget
+                    # runs out through THIS branch, the leftover heights
+                    # never reach all_failed_blocks and the sync ends
+                    # without raising — see the banner
                     logger.error(f"Pool error syncing blocks {batch_start} to {batch_end} (attempt {retry_count + 1}): {e}")
                     if retry_count < max_retries - 1:
                         logger.info(f"Waiting {retry_delay} seconds before retrying due to pool error...")
                         time.sleep(retry_delay)
-                    
+
                 retry_count += 1
-                
+
             if not blocks_to_process:
                 logger.info(f"Batch {batch_start}-{batch_end} completed successfully")
             else:
                 logger.error(f"Batch {batch_start}-{batch_end} completed with {len(blocks_to_process)} permanently failed blocks")
 
-        # Check if any blocks failed permanently and raise exception
+
+        # STEP 3: one permanent failure anywhere fails the whole
+        # sync — the workflow shows red instead of silently
+        # missing blocks
+        # ======================================================
         if all_failed_blocks:
             logger.error(f"Sync completed with {len(all_failed_blocks)} permanently failed blocks out of {total_blocks_attempted} attempted")
             raise BlockSyncError(all_failed_blocks, total_blocks_attempted)
-        
+
         logger.info(f"Sync completed successfully. All {total_blocks_attempted} blocks synced.")

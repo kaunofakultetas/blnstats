@@ -1,3 +1,19 @@
+############################################################
+#  [*] GeneralStats — network totals & channel lifetimes
+#
+#  Aggregation layer between the metric selectors and the
+#  chart flows: generateGeneralStatisticsCharts
+#  (blnstats/__init__.py) feeds NodeMetricsSelector
+#  capacity/channel-count snapshots into calculate() and
+#  charts the result via charts/chart_generator.py; the
+#  channel-lifetime methods skip the selectors, query
+#  MySQL directly (database/utils.get_db_connection) and
+#  write JSON under
+#  /DATA/GENERATED/General_Stats/Channel_Lifetime/ for the
+#  frontend to serve.
+############################################################
+
+
 from datetime import datetime
 from ..data_types import VerticesAspectDataStructure, GeneralStatsDataStructure
 from ..database.utils import get_db_connection
@@ -5,12 +21,61 @@ import json
 import os
 
 
+
+
+
+
+
+
+############################################################
+# GeneralStats
+############################################################
+#
+# Three independent, stateless jobs: per-month network
+# totals (calculate), the channel-lifetime histogram
+# (calculate_channel_lifetime_plot) and the average
+# channel lifetime (calculate_channel_lifetime_average).
+#
+# Used by:
+#   - generateGeneralStatisticsCharts
+#     (blnstats/__init__.py) — calculate + the histogram
+#   - main.py — flags --calculate-channel-lifetime-plot /
+#     --calculate-channel-lifetime-average (hidden: not
+#     listed in the usage text)
+############################################################
+
 class GeneralStats:
 
 
+
+
+
+
+    ############################################################
+    # calculate
+    ############################################################
+    #
+    # Merges the parallel capacity and channel-count
+    # snapshot series (they must cover the SAME block
+    # heights) into one GeneralStatsDataStructure: per
+    # height the node count, network capacity in BTC and
+    # total channel count.
+    #
+    # Both sums divide by 2 because every channel is
+    # reported at both endpoints; capacity additionally
+    # divides by 1e8 (satoshis -> BTC).
+    #
+    # Used by:
+    #   - generateGeneralStatisticsCharts
+    #     (blnstats/__init__.py)
+    ############################################################
+
     def calculate(self, vertices_capacity_data: VerticesAspectDataStructure, vertices_channel_count_data: VerticesAspectDataStructure):
-        
-        # Check incoming data for consistency
+        # STEP 1: consistency guard — expected yAxis labels,
+        # equal length, same first/last block height. NOTE: a
+        # mid-series height mismatch slips through, only the
+        # endpoints are compared.
+        # ===================================================
         if(vertices_capacity_data.meta.yAxis != "List(NodeID,Capacity)"):
             raise ValueError("VerticesCapacityDataStructure must have a yAxis of 'List(NodeID,Capacity)'")
         if(vertices_channel_count_data.meta.yAxis != "List(NodeID,ChannelCount)"):
@@ -23,31 +88,30 @@ class GeneralStats:
             raise ValueError("VerticesCapacityDataStructure and VerticesChannelCountDataStructure must end with the same block height")
 
 
-        # Get block height data
+        # STEP 2: unzip the per-height series the structure
+        # needs
+        # =================================================
         block_height_data = [block_height for block_height, vertices in vertices_capacity_data.data.items()]
 
-        # Get date for each block height
         date_data = [item.date for item in vertices_capacity_data.data.values()]
 
-        # Get timestamp for each block height
         timestamp_data = [item.timestamp for item in vertices_capacity_data.data.values()]
 
-        # Get the node count for each block height
         node_count_data = [len(item.vertices) for item in vertices_capacity_data.data.values()]
 
-        # Get the node capacity sum for each block height:
-        #   - For a general sum of capacities we need to divide by 2 because each 
-        #     channel is counted twice (one for each node)
+        # STEP 2.1: capacity sum — /2 because each channel is
+        # reported by both endpoints, /1e8 satoshis -> BTC
         node_capacity_sum_data = [sum(vertice.value / (2 * 100000000) for vertice in vertices_entry.vertices)
                 for vertices_entry in vertices_capacity_data.data.values()]
 
-        # Get the channel count sum for each block height:
-        #   - For a general count of channels we need to divide by 2 because 
-        #     each channel is counted twice (one for each node)
-        channel_count_sum_data = [sum(vertice.value / 2 for vertice in vertices_entry.vertices) 
+        # STEP 2.2: channel count — /2 for the same
+        # both-endpoints double-report reason
+        channel_count_sum_data = [sum(vertice.value / 2 for vertice in vertices_entry.vertices)
                 for vertices_entry in vertices_channel_count_data.data.values()]
-        
 
+
+        # STEP 3: assemble the structure
+        # ==============================
         general_stats_data = GeneralStatsDataStructure(
             meta={
                 "type": "GeneralStatsDataStructure",
@@ -78,12 +142,35 @@ class GeneralStats:
 
 
 
+    ############################################################
+    # calculate_channel_lifetime_plot
+    ############################################################
+    #
+    # Histogram of channel lifetimes in whole days
+    # (x: lifetime in days, y: channel count), written to
+    # /DATA/GENERATED/General_Stats/Channel_Lifetime/
+    # channel_lifetime_plot.json. Lifetimes come from the
+    # blockchain funding/spending indexes; still-open
+    # channels count up to the current chain tip. Days with
+    # zero channels are omitted from the plot data.
+    #
+    # NOTE: leaves a debug print of the total channel count
+    # on stdout (documented, not removed).
+    #
+    # Used by:
+    #   - generateGeneralStatisticsCharts
+    #     (blnstats/__init__.py)
+    #   - main.py --calculate-channel-lifetime-plot
+    ############################################################
+
     def calculate_channel_lifetime_plot(self):
-        '''
-        This method calculates distribution of channel lifetimes.
-        X axis: Channel lifetime in days
-        Y axis: Number of channels
-        '''
+        # STEP 1: lifetime per channel in blocks —
+        # SpendingBlockIndex 999999999 is the "still open"
+        # sentinel, resolved to the current chain tip. The
+        # WHERE drops same-block closes and inverted
+        # funding/spending rows, and its NOT NULL filters turn
+        # the LEFT JOIN into an effective inner join.
+        # ====================================================
         with get_db_connection() as db_conn:
             with db_conn.cursor(dictionary=True) as db_cursor:
                 query = '''
@@ -105,35 +192,49 @@ class GeneralStats:
                 '''
                 db_cursor.execute(query)
                 results = db_cursor.fetchall()
-                
-                # Extract channel lifetimes and convert to days (assuming blocks per day conversion)
-                # Note: You may need to adjust the blocks_per_day conversion based on your blockchain
-                blocks_per_day = 144  # Typical for Bitcoin, adjust as needed
+
+
+                # STEP 2: blocks -> days at Bitcoin's ~144
+                # blocks/day cadence
+                # ========================================
+                blocks_per_day = 144  # Bitcoin's ~10-minute block cadence
                 lifetimes_days = [row['ChannelLifetime'] / blocks_per_day for row in results if row['ChannelLifetime'] is not None]
-                
-                # Create histogram bins - group by day ranges
+
+
+                # STEP 3: bucket by whole days — the imports sit
+                # mid-function in the original and a restyle
+                # moves no code, so they stay here
+                # ==============================================
                 from collections import Counter
                 import math
-                
-                # Round to nearest day and count occurrences
+
                 lifetime_counts = Counter(math.floor(lifetime) for lifetime in lifetimes_days if lifetime >= 0)
-                
-                # Create sorted list of (lifetime_days, count) pairs
+
+
+                # STEP 4: keep only days that actually have
+                # channels
+                # =========================================
                 total_channel_count = 0
                 plot_data = {}
                 if lifetime_counts:
                     max_lifetime = max(lifetime_counts.keys())
                     for day in range(0, max_lifetime + 1):
                         count = lifetime_counts.get(day, 0)
-                        if count > 0:  # Only include days that have channels
+                        if count > 0:  # zero-channel days are omitted
                             plot_data[day] = {
                                 'lifetime_days': day,
                                 'channel_count': count
                             }
                             total_channel_count += count
-                
+
+                # Debug print left in (documented, not removed)
                 print(total_channel_count)
 
+
+                # STEP 5: write the plot JSON — total_channels in
+                # meta counts every fetched channel, which equals
+                # the sum of the per-day buckets
+                # ===============================================
                 data = {
                     'meta': {
                         'type': 'ChannelLifetimePlot',
@@ -152,6 +253,32 @@ class GeneralStats:
 
 
 
+
+
+
+    ############################################################
+    # calculate_channel_lifetime_average
+    ############################################################
+    #
+    # Single-value companion of the histogram: AVG(lifetime
+    # in blocks) computed by SQL, written to
+    # channel_lifetime_average.json in blocks and days
+    # (/144). Returns the raw SQL value — a Decimal, or
+    # None on an empty table — even though the JSON payload
+    # already coerces to float.
+    #
+    # NOTE (inconsistency, documented not fixed): this
+    # WHERE lacks the histogram query's
+    # "Spending > Funding OR sentinel" condition, so
+    # same-block and inverted funding/spending rows count
+    # here but not in the histogram. Debug print of the
+    # average left in.
+    #
+    # Used by:
+    #   - main.py --calculate-channel-lifetime-average
+    #     (hidden flag) — nothing else calls this at the
+    #     moment
+    ############################################################
 
     def calculate_channel_lifetime_average(self):
         with get_db_connection() as db_conn:
@@ -176,9 +303,11 @@ class GeneralStats:
                 '''
                 db_cursor.execute(query)
                 result = db_cursor.fetchone()
+                # Debug print left in (documented, not removed)
                 print(result['AverageChannelLifetime'])
 
-                # Convert Decimal to float for JSON serialization
+                # SQL AVG comes back as Decimal — coerce so
+                # json.dump does not choke; empty table -> 0
                 avg_lifetime = float(result['AverageChannelLifetime']) if result['AverageChannelLifetime'] is not None else 0
 
                 data = {

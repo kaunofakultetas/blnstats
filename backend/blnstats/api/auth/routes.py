@@ -1,9 +1,18 @@
 ############################################################
-# Author:           Tomas Vanagas
-# Updated:          2025-03-11
-# Version:          1.0
-# Description:      Authentication and user 
-#                   management routes (MySQL)
+#  [*] Auth — login, session probe and administrator CRUD
+#
+#  Session-cookie authentication on top of flask-login and
+#  bcrypt, plus the System_Users administration endpoints.
+#  Login is enumeration-safe: unknown emails burn a dummy
+#  bcrypt check so timing matches the wrong-password path.
+#  NOTE: the @admin_required decorator on the administrator
+#  routes is commented out — any logged-in user can manage
+#  accounts.
+#
+#    POST /api/login                — session login
+#    GET  /api/checkauth            — session probe, LastSeen
+#    GET  /api/admin/administrators — user list
+#    POST /api/admin/administrators — insert/update/delete
 ############################################################
 
 
@@ -17,17 +26,39 @@ from .user import get_user_by_email
 from ...database.utils import get_db_connection
 
 
-
 auth_bp = Blueprint('auth', __name__)
 
 
 
 
+
+
+
+
+
+############################################################
+# login_HTTPPOST
+############################################################
+#
+# POST /api/login
+#
+# Validates credentials against System_Users and opens a
+# flask-login session. Every failure returns HTTP 200 with
+# a plain-text reason — the frontend treats any body other
+# than 'OK' as the error message to display. Unknown emails
+# still run bcrypt against a fixed dummy hash so response
+# timing does not reveal whether the account exists.
+#
+# Used by:
+#   - Login.jsx (vite/app/src/systemPages/PublicPages/
+#     Login) — the login form submit
+############################################################
+
 @auth_bp.route('/api/login', methods=['POST'])
 def login_HTTPPOST():
     postData = request.get_json()
 
-    # Preauth Checks
+    # field presence only — password quality is the admin form's problem
     if( not postData or (not postData.get('email') and not postData.get('password')) ):
         return "Please enter email and password."
 
@@ -38,37 +69,58 @@ def login_HTTPPOST():
         return "Please enter password."
 
 
-    # Authentication
+    # emails are stored lowercase — lowercasing here makes login case-insensitive
     thisUserObject = get_user_by_email(postData['email'].lower())
     if(thisUserObject is not None):
-        # Login Check
         if( bcrypt.checkpw( str.encode(postData.get('password')), str.encode(thisUserObject.password) )):
             login_user(thisUserObject)
             return 'OK'
         return "Incorrect email or password."
-    
+
     else:
-        # Dummy check
-        bcrypt.checkpw( str.encode("This Only Used to prevent time based user enumeration attack, so doing nothing there."), 
+        # burn a real bcrypt verification for unknown emails too — keeps the
+        # response time identical to the wrong-password path (anti-enumeration)
+        bcrypt.checkpw( str.encode("This Only Used to prevent time based user enumeration attack, so doing nothing there."),
                         str.encode('$2b$12$37rvWwtdP/sb.pZwBklPFeUxoH.KWOXIDjTxiiC9awCYpXIB8EbmS') )
         return "Incorrect email or password."
 
 
 
 
+
+
+
+
+
+############################################################
+# checkauth_HTTPGET
+############################################################
+#
+# GET /api/checkauth
+#
+# Confirms the session cookie is still valid, returns the
+# user's id/email and stamps System_Users.LastSeen. The
+# 'admin' field is hardcoded to 1 — current_user.admin is
+# ignored, so every logged-in user looks like an admin to
+# the frontend.
+#
+# Used by:
+#   - AuthGuard.jsx (vite/app/src) — the auth probe behind
+#     every /admin page
+############################################################
+
 @auth_bp.route('/api/checkauth', methods=['GET'])
 @login_required
 def checkauth_HTTPGET():
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
-            # User Info
             user_info = {
                 "id": current_user.id,
                 "email": current_user.email,
                 "admin": 1
             }
 
-            # Update LastLogin
+            # every successful probe counts as activity
             timeNow = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute('UPDATE System_Users SET LastSeen = %s WHERE ID = %s', [timeNow, current_user.id])
             conn.commit()
@@ -76,6 +128,36 @@ def checkauth_HTTPGET():
 
 
 
+
+
+
+
+
+
+############################################################
+# usersList_HTTP
+############################################################
+#
+# GET  /api/admin/administrators
+# POST /api/admin/administrators
+#
+# GET returns all System_Users rows as one JSON array built
+# by MySQL (JSON_ARRAYAGG); POST multiplexes insert/update
+# and delete through the `action` field, with an empty `id`
+# meaning insert. Gotchas: an empty table makes
+# JSON_ARRAYAGG return NULL, so json.loads(None) raises on
+# GET; the 'at least 8 characters' error message only
+# actually checks for an EMPTY password; inserts use INSERT
+# IGNORE, so a duplicate email silently answers 'ok'; new
+# rows get LastSeen = '' (never NULL); and the bcrypt hash
+# is computed even when the password is empty or unused.
+#
+# Used by:
+#   - AdministratorsListTable.jsx (vite/app/src/systemPages
+#     /AdminPages/AdministratorsList/…) — the GET list
+#   - AddEditAdministrator.jsx (same folder) — POST with
+#     action insertupdate / delete
+############################################################
 
 @auth_bp.route('/api/admin/administrators', methods=['GET', 'POST'])
 @login_required
@@ -108,22 +190,24 @@ def usersList_HTTP():
                     passwordHash = bcrypt.hashpw(postData['password'].encode('utf-8'), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
                     if(postData['id'] == ''):
+                        # message promises 8 chars but the check only rejects an empty password
                         if(len(postData['password']) == 0):
                             cursor.close()
                             return Response(json.dumps({'type': 'error', 'reason': 'Password must be at least 8 characters long'}), mimetype='application/json')
                         cursor.execute(' INSERT IGNORE INTO System_Users (Email, Password, Admin, Enabled, LastSeen) VALUES (%s,%s,%s,%s,%s) ',
                                         [ postData['email'], passwordHash, postData['admin'], postData['enabled'], '' ])
-                    else:    
+                    else:
+                        # empty password on update means "keep the current one"
                         if(len(postData['password']) != 0):
                             cursor.execute(' UPDATE System_Users SET Password = %s WHERE ID = %s ', [ passwordHash,         postData['id'] ])
                         cursor.execute(' UPDATE System_Users SET Email = %s WHERE ID = %s ',        [ postData['email'],    postData['id'] ])
                         cursor.execute(' UPDATE System_Users SET Admin = %s WHERE ID = %s ',        [ postData['admin'],    postData['id'] ])
                         cursor.execute(' UPDATE System_Users SET Enabled = %s WHERE ID = %s ',      [ postData['enabled'],  postData['id'] ])
-                    
+
                     conn.commit()
                     cursor.close()
                     return Response(json.dumps({'type': 'ok'}), mimetype='application/json')
-                
+
 
                 elif(postData['action'] == 'delete'):
                     cursor.execute(' DELETE FROM System_Users WHERE ID = %s ', [ postData['id'] ])
@@ -132,4 +216,3 @@ def usersList_HTTP():
                     return Response(json.dumps({'type': 'ok'}), mimetype='application/json')
                 cursor.close()
                 return Response(json.dumps({'type': 'error'}), mimetype='application/json')
-

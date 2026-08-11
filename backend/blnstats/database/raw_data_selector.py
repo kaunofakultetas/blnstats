@@ -1,42 +1,87 @@
+############################################################
+#  [*] Raw-data selector — first blocks + per-node metrics
+#
+#  SQL reader for the raw tables the importers fill:
+#  Blockchain_Blocks (data_import/blockchain_blocks.py),
+#  Lightning_Channels (data_import/lnd_dbreader.py and
+#  ln_research.py) and Blockchain_Transactions
+#  (data_import/blockchain_transactions.py). Results flow
+#  on to data_transform/node_metrics.py — which caches
+#  the per-node numbers into _CACHED1_NodeMetrics — and
+#  to the chart/CSV pipelines in blnstats/__init__.py.
+############################################################
+
+
 import logging
 import json
 from datetime import datetime
 from ..database.utils import get_db_connection
 from ..data_types import MetaDataStructure, BlockchainBlockHeightsStructure, VerticesAspectDataStructure
 
-# Configure logging
+# NOTE (dead imports, kept as-is): json and
+# VerticesAspectDataStructure are never used in this
+# module.
 logger = logging.getLogger(__name__)
 
 
 
+
+
+
+
+
+############################################################
+# RawDataSelector
+############################################################
+#
+# Stateless reader of the raw blockchain/LN tables:
+# date → first-block lookups (the x-axis of every
+# chart) and the heavy per-node aggregations the
+# _CACHED1_NodeMetrics cache is built from. Methods:
+#   - get_first_blocks_of_days_by_date_mask
+#   - get_first_blocks_of_months
+#   - get_ln_nodes_capacities
+#   - get_ln_nodes_channel_counts
+############################################################
+
 class RawDataSelector:
-    """
-    Class for fetching raw data from the database.
 
-    This class provides methods to retrieve various types of data from the database,
-    such as the first blocks of each month or node capacities and channel counts at specific block heights.
-    """
 
+
+
+
+
+    ############################################################
+    # get_first_blocks_of_days_by_date_mask
+    ############################################################
+    #
+    # For every Date matching dateMask, returns the LOWEST
+    # block height mined on that date. 'X' matches exactly
+    # one character ('20XX-XX-01' → every first of a
+    # month, '20XX-03-01' → every March 1st). Returns a
+    # BlockchainBlockHeightsStructure whose data is keyed
+    # by str(BlockHeight) → {date, timestamp}, ordered by
+    # date.
+    # BUG (documented, not fixed): the dateMask=None
+    # default crashes .replace() with AttributeError —
+    # every live caller passes a mask.
+    #
+    # Used by (all in blnstats/__init__.py):
+    #   - generateCoefficientCharts
+    #   - generateOverlappingCoefficientCharts
+    #   - generateCoefficientsOnSingleChart
+    #   - generateLorenzCharts
+    #   - generateGeneralStatisticsCharts
+    #   - generateCSV_EntityMetrics
+    ############################################################
 
     def get_first_blocks_of_days_by_date_mask(self, dateMask=None, startSince='2018-01-01', endUntil='2050-01-01'):
-        """
-        Retrieves the block heights of the first block for each first day of the month.
-        For example:
-            - If the date mask is '20XX-03-01', the function will retrieve 2018-03-01, 2019-03-01, 2020-03-01, etc.
-            - If the date mask is '20XX-XX-01', the function will retrieve 2018-01-01, 2018-02-01, 2018-03-01, etc.
 
-        :param dateMask: str - The date mask to retrieve data from (format: 'XX-MM-DD').
-        :param startSince: str - The start date to retrieve data from (format: 'YYYY-MM-DD').
-        :param endUntil: str - The end date to retrieve data from (format: 'YYYY-MM-DD').
-        :return: BlockchainBlockHeights - Data structure containing metadata and block heights.
-        """
-
-        # Adjust the dateMask for SQL LIKE clause
+        # 'X' → '_', the single-character wildcard of SQL LIKE
         sql_date_mask = dateMask.replace('X', '_')
 
         with get_db_connection() as db_conn:
             with db_conn.cursor(dictionary=True) as db_cursor:
-                # Retrieve all dates that match the given date mask
                 db_cursor.execute('''
                     SELECT 
                         BlockHeight, 
@@ -81,16 +126,32 @@ class RawDataSelector:
 
 
 
-    def get_first_blocks_of_months(self, withMeta=False, startSince='2018-01-01', endUntil='9999-12-31'):
-        """
-        Retrieves the block heights of the first block for each first day of the month.
 
-        :param withMeta: bool - Whether to return metadata (True) or just the block heights (False).
-        :param startSince: str - The start date to retrieve data from (format: 'YYYY-MM-DD').
-        :param endUntil: str - The end date to retrieve data from (format: 'YYYY-MM-DD').
-        :return: BlockchainBlockHeights - Data structure containing metadata and block heights.
-        """
-        
+
+
+    ############################################################
+    # get_first_blocks_of_months
+    ############################################################
+    #
+    # The MIN(BlockHeight) lookup restricted to
+    # DAY(Date)=1 — the first block of every month.
+    # withMeta=False returns the bare {str(BlockHeight):
+    # BlockData} dict; True wraps it in a
+    # BlockchainBlockHeightsStructure.
+    # BUG (documented, not fixed): the withMeta=True
+    # branch builds MetaDataStructure WITHOUT the required
+    # 'updated' field, so it raises a pydantic
+    # ValidationError. Harmless today: the only caller
+    # passes withMeta=False.
+    #
+    # Used by:
+    #   - NodeMetrics.transformForFirstBlocksOfMonths
+    #     (data_transform/node_metrics.py), withMeta=False
+    #     — the _CACHED1_NodeMetrics refresh loop
+    ############################################################
+
+    def get_first_blocks_of_months(self, withMeta=False, startSince='2018-01-01', endUntil='9999-12-31'):
+
         with get_db_connection() as db_conn:
             with db_conn.cursor(dictionary=True) as db_cursor:
                 db_cursor.execute('''
@@ -135,26 +196,36 @@ class RawDataSelector:
                     return BlockchainBlockHeightsStructure(meta=meta, data=data)
                 else:
                     return data
-        
 
+
+
+
+
+
+    ############################################################
+    # get_ln_nodes_capacities
+    ############################################################
+    #
+    # Sums, per node, the funding value (sats) of every
+    # channel ACTIVE at blockHeight: FundingBlockIndex <=
+    # blockHeight AND SpendingBlockIndex > blockHeight.
+    # Channels still unspent carry the 999999999 sentinel
+    # written by data_import/blockchain_transactions.py,
+    # so open channels always pass the second test. The
+    # UNION ALL credits each channel's FULL value to BOTH
+    # endpoints — summing the result over all nodes
+    # double-counts network capacity
+    # (GeneralStats.calculate divides by 2 downstream).
+    # Returns a list of {'NodeID', 'NodeValue'} dicts.
+    #
+    # Used by:
+    #   - NodeMetrics.transformForBlockHeight
+    #     (data_transform/node_metrics.py) — the
+    #     _CACHED1_NodeMetrics cache builder
+    ############################################################
 
     def get_ln_nodes_capacities(self, blockHeight):
-        """
-        Fetches the capacities of LN nodes at a specific block height.
-        
-        A channel is considered active at a given block height if:
-        - It was opened (funded) on or before the block (FundingBlockIndex <= blockHeight),
-        - It closes (is spent) after the block (SpendingBlockIndex > blockHeight).
-        
-        This method sums up the capacity (transaction value) for both positions (NodeID1 and NodeID2)
-        across all active channels at the given block height.
-        
-        :param blockHeight: int - The block height at which channels are active.
-        :return: list of dicts - Each dict contains 'NodeID' and 'NodeValue', representing the total 
-                                 capacity attributed to that node.
-        """
         with get_db_connection() as db_conn:
-            # Using a dictionary-based cursor for clearer column references
             with db_conn.cursor(dictionary=True) as db_cursor:
                 query = '''
                     SELECT NodeID, SUM(Value) AS NodeValue FROM (
@@ -177,7 +248,8 @@ class RawDataSelector:
                     GROUP BY NodeID;
                 '''
                 logger.debug("Executing LN nodes capacities query for blockHeight: %s", blockHeight)
-                # We pass the blockHeight twice for each subquery's condition (total four parameters)
+                # Each UNION arm repeats both WHERE conditions —
+                # hence four identical parameters
                 db_cursor.execute(query, (blockHeight, blockHeight, blockHeight, blockHeight))
                 result = db_cursor.fetchall()
                 logger.debug("LN nodes capacities result: %s", result)
@@ -185,20 +257,27 @@ class RawDataSelector:
 
 
 
+
+
+
+    ############################################################
+    # get_ln_nodes_channel_counts
+    ############################################################
+    #
+    # Counts, per node, the channels ACTIVE at blockHeight
+    # — same activity rule and 999999999 sentinel as
+    # get_ln_nodes_capacities above. Endpoint counting
+    # again: a channel adds one to BOTH endpoints, so the
+    # network-wide total is the sum divided by 2. Returns
+    # a list of {'NodeID', 'ChannelCount'} dicts.
+    #
+    # Used by:
+    #   - NodeMetrics.transformForBlockHeight
+    #     (data_transform/node_metrics.py) — the
+    #     _CACHED1_NodeMetrics cache builder
+    ############################################################
+
     def get_ln_nodes_channel_counts(self, blockHeight):
-        """
-        Fetches the channel counts of LN nodes at a specific block height.
-        
-        A channel is considered active at a given block height if:
-        - It was opened (funded) on or before the block (FundingBlockIndex <= blockHeight),
-        - It closes (is spent) after the block (SpendingBlockIndex > blockHeight).
-        
-        This method counts the number of active channels that each node participates in, 
-        taking into account that a node might appear as either NodeID1 or NodeID2.
-        
-        :param blockHeight: int - The block height at which channels are active.
-        :return: list of dicts - Each dict contains 'NodeID' and 'ChannelCount'.
-        """
         with get_db_connection() as db_conn:
             with db_conn.cursor(dictionary=True) as db_cursor:
                 query = '''
@@ -226,6 +305,3 @@ class RawDataSelector:
                 result = db_cursor.fetchall()
                 logger.debug("LN nodes channel counts result: %s", result)
                 return [{'NodeID': row['NodeID'], 'ChannelCount': row['ChannelCount']} for row in result]
-
-
-

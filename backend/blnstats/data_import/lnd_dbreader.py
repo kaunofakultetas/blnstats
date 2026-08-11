@@ -1,3 +1,24 @@
+############################################################
+#  [*] LND DBReader JSON import
+#
+#  Imports a gossip dump produced by the external
+#  "LND DBReader" tool — a JSON export of an LND node's
+#  gossip store with channel_announcements,
+#  node_announcements and node_addresses arrays under a
+#  top-level 'data' key — into the _LND_DBReader_* staging
+#  tables, then promotes the channel announcements into the
+#  shared Lightning_Channels table.
+#
+#  Neighbours: the dump arrives as a .json.gz URL (the
+#  faculty LND node, or this site's own /rawdata mirror of
+#  the '--latest' copy saved by __download_data) or as a
+#  local file. Staged rows flow on to compare_sources.py
+#  (source cross-check) and to EntityClusters (node-alias
+#  import in blnstats/__init__.py importLNDDBReader);
+#  Lightning_Channels is also fed by ln_research.py.
+############################################################
+
+
 import json
 from datetime import datetime
 import gzip
@@ -10,37 +31,83 @@ import shutil
 
 
 
+
+
+
+
+############################################################
+# LNDDBReader
+############################################################
+#
+# Instantiating the class runs the whole import — every step
+# happens in __init__. Unlike the frozen LN Research
+# snapshot, this source is a LIVING export re-imported over
+# time, so node rows are upserted with widening
+# FirstSeen/LastSeen windows instead of being replaced.
+# NOTE: _LND_DBReader_NodeAddresses is written here but no
+# backend code reads it at the moment.
+#
+# Used by:
+#   - blnstats/__init__.py importLNDDBReader() — reached from
+#     main.py --import-lnd-dbreader-data (CLI) and from the
+#     workflows.py task import_lnd_dbreader_data
+#     (lnd_dbreader_import_flow, lnd_dbreader_full_update_flow
+#     and full_initialization_flow)
+############################################################
+
 class LNDDBReader:
-    """
-    Class for importing LND DBReader data into the database.
 
-    This class is designed to handle the parsing and storage of LND DBReader data,
-    which contains data related to the Lightning Network such as channel announcements,
-    node announcements, and node addresses.
-    """
 
+
+
+
+
+    ############################################################
+    # __init__
+    ############################################################
+    #
+    # The constructor IS the pipeline: download when the
+    # source is a URL, parse the JSON, create the staging
+    # tables, write the rows, promote the channels. There is
+    # nothing to call afterwards.
+    #
+    # Used by:
+    #   - blnstats/__init__.py importLNDDBReader() — the only
+    #     caller; see the class banner for the full chain
+    ############################################################
 
     def __init__(self, file_path):
-        """
-        Initializes the LNDDBReader class with the path to the LND DBReader data.
-
-        :param file_path: str - Path to the LND DBReader data (local file or URL).
-        """
+        # STEP 1: remember the source; a URL is downloaded to
+        # /DATA/INPUT first so file_path is local from here on
+        # ====================================================
         self.file_path = file_path
 
         if(file_path.startswith('http')):
             print(f"[*] Downloading LND DBReader data from '{file_path}'")
             self.file_path = self.__download_data(file_path)
 
+
+        # STEP 2: parse the dump — self.data is the 'data' dict
+        # =====================================================
         print(f"[*] Reading LND DBReader data from '{self.file_path}'")
         self.data = self.__read_file()
 
+
+        # STEP 3: make sure the _LND_DBReader_* staging tables exist
+        # ==========================================================
         print("[*] Creating tables if not exists")
         self.create_tables_if_not_exists()
 
+
+        # STEP 4: write the three data arrays into the staging tables
+        # ===========================================================
         print("[*] Writing data to database")
         self.import_data()
 
+
+        # STEP 5: promote channel announcements into the shared
+        # Lightning_Channels table
+        # =====================================================
         print("[*] Inserting data into main system table (DB Table: Lightning_Channels)")
         self.insert_or_ignore_into_main()
 
@@ -48,6 +115,29 @@ class LNDDBReader:
 
 
 
+
+
+
+    ############################################################
+    # __download_data
+    ############################################################
+    #
+    # Saves the dump under /DATA/INPUT as
+    # lnd-dbreader-<ID>--<timestamp>.json.gz, where <ID> is
+    # the first 8 hex chars of the URL's SHA-256 — one
+    # timestamped series per source URL. Every run downloads
+    # afresh (no cache-skip like ln_research.py): that is what
+    # builds the series. A copy also lands on
+    # lnd-dbreader-<ID>--latest.json.gz; that '--latest' file
+    # is what full_initialization_flow (workflows.py) pulls
+    # back in through this site's public /rawdata/INPUT/ URL.
+    # _tmp-then-rename keeps a crashed download from leaving a
+    # half-written file under the final name. Only .gz URLs
+    # are accepted — anything else raises ValueError.
+    #
+    # Used by:
+    #   - __init__ (above) — when the source is an http(s) URL
+    ############################################################
 
     def __download_data(self, url):
         response = requests.get(url, timeout=30)
@@ -68,15 +158,46 @@ class LNDDBReader:
 
 
 
+
+
+
+    ############################################################
+    # __read_file
+    ############################################################
+    #
+    # Loads the dump and returns only its 'data' payload;
+    # .gz vs plain JSON is decided by the file extension.
+    #
+    # Used by:
+    #   - __init__ (above)
+    ############################################################
+
     def __read_file(self):
         if(self.file_path.endswith('.gz')):
             with gzip.open(self.file_path, 'rt') as file:
                 return json.load(file)['data']
         else:
             with open(self.file_path, 'r') as file:
-                return json.load(file)['data']  
+                return json.load(file)['data']
 
 
+
+
+
+
+    ############################################################
+    # create_tables_if_not_exists
+    ############################################################
+    #
+    # Creates the three _LND_DBReader_* staging tables — the
+    # same shapes as their _LNResearch_* twins, so
+    # compare_sources.py can query both sides symmetrically.
+    # Public (unlike ln_research.py's name-mangled version),
+    # but nothing outside this class calls it at the moment.
+    #
+    # Used by:
+    #   - __init__ (above)
+    ############################################################
 
     def create_tables_if_not_exists(self):
         with get_db_connection() as conn:
@@ -120,12 +241,40 @@ class LNDDBReader:
 
 
 
+
+
+
+    ############################################################
+    # import_data
+    ############################################################
+    #
+    # Writes the three 'data' arrays row by row over one
+    # connection, one commit per pass: channel announcements
+    # via INSERT IGNORE (immutable facts), node announcements
+    # and node addresses upserted with FirstSeen = LEAST /
+    # LastSeen = GREATEST so repeated imports only WIDEN each
+    # sighting window. Public, but nothing outside this class
+    # calls it at the moment.
+    #
+    # Used by:
+    #   - __init__ (above)
+    ############################################################
+
     def import_data(self):
+        # STEP 1: one connection and cursor for all three
+        # passes — commits happen per pass, not per row
+        # ===============================================
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
+
+
+                # STEP 2: channel announcements — INSERT IGNORE
+                # =============================================
                 print("[*] Inserting channel announcements into _LND_DBReader_ChannelAnnouncements table (INSERT OR IGNORE)")
                 for item in self.data['channel_announcements']:
 
+                    # ShortChannelID packs block height / tx
+                    # index / output index as 24 + 24 + 16 bits
                     short_channel_id = item['ShortChannelID']
                     block_height = (short_channel_id >> 40) & 0xFFFFFF
                     tx_index = (short_channel_id >> 16) & 0xFFFFFF
@@ -141,6 +290,8 @@ class LNDDBReader:
                 conn.commit()
 
 
+                # STEP 3: node announcements — widening upsert
+                # ============================================
                 print("[*] Inserting node announcements into _LND_DBReader_NodeAnnouncements table (INSERT OR UPDATE)")
                 for item in self.data['node_announcements']:
                     node_id = item['NodeID']
@@ -158,6 +309,8 @@ class LNDDBReader:
                 conn.commit()
 
 
+                # STEP 4: node addresses — widening upsert
+                # ========================================
                 print("[*] Inserting node addresses into _LND_DBReader_NodeAddresses table (INSERT OR UPDATE)")
                 for item in self.data['node_addresses']:
                     node_id = item['NodeID']
@@ -177,6 +330,23 @@ class LNDDBReader:
 
 
 
+
+
+
+    ############################################################
+    # insert_or_ignore_into_main
+    ############################################################
+    #
+    # Promotes the staged channel announcements into the
+    # shared Lightning_Channels table. INSERT IGNORE — rows
+    # already promoted (e.g. by the LN Research import) stay
+    # untouched. Public, but nothing outside this class calls
+    # it at the moment.
+    #
+    # Used by:
+    #   - __init__ (above) — final pipeline step
+    ############################################################
+
     def insert_or_ignore_into_main(self):
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -193,4 +363,3 @@ class LNDDBReader:
                     FROM _LND_DBReader_ChannelAnnouncements ca
                 ''')
                 conn.commit()
-

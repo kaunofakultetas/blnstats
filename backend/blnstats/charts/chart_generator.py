@@ -1,3 +1,27 @@
+############################################################
+#  [*] Chart generator — matplotlib SVG renderers
+#
+#  Rendering layer of the stats pipeline. The chart flows
+#  in blnstats/__init__.py (generateCoefficientCharts,
+#  generateOverlappingCoefficientCharts,
+#  generateCoefficientsOnSingleChart, generateLorenzCharts,
+#  generateExampleLorenzCharts,
+#  generateGeneralStatisticsCharts — driven by workflows.py
+#  and main.py --calculate-ln-stats) and
+#  CompareSources.plot_data (data_import/compare_sources.py)
+#  feed prepared x/y series in; the rendered SVGs flow on
+#  to /DATA/GENERATED/... via save_chart, where the
+#  frontend picks them up.
+#
+#  All text renders through LaTeX (text.usetex) — the
+#  backend container must ship a TeX installation or every
+#  render call dies.
+#
+#  NOTE: mdates and the typing imports are unused (dead
+#  imports, left untouched by the restyle).
+############################################################
+
+
 from matplotlib.ticker import PercentFormatter
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -9,7 +33,35 @@ from typing import List, Dict, Any, Optional
 
 
 
+
+
+
+
+
+############################################################
+# BaseChartGenerator
+############################################################
+#
+# One-shot line-chart builder: construct with the series,
+# stage styling with customize_axes / set_x_ticks, render
+# with generate_line_chart, persist with save_chart.
+# Instances are single-use — rendering closes the figure.
+#
+# Used by:
+#   - generateCoefficientCharts,
+#     generateOverlappingCoefficientCharts,
+#     generateCoefficientsOnSingleChart,
+#     generateGeneralStatisticsCharts (blnstats/__init__.py)
+#   - CompareSources.plot_data
+#     (blnstats/data_import/compare_sources.py)
+#   - LorenzCurveChartGenerator (below) — subclass reusing
+#     the styling/serialization helpers
+############################################################
+
 class BaseChartGenerator:
+    # Shared font sizing for every chart on the site;
+    # callers/subclasses override single values (Lorenz
+    # shrinks the axis labels, CompareSources the y label)
     title_fontsize = 15
     x_label_fontsize = 24
     y_label_fontsize = 24
@@ -18,8 +70,24 @@ class BaseChartGenerator:
     footer_fontsize = 10
 
 
+
+
+
+
+    ############################################################
+    # __init__
+    ############################################################
+    #
+    # One shared x series; y_data_list carries one list per
+    # line and is zipped with labels at plot time. x_ticks
+    # stays None until set_x_ticks — None means "matplotlib
+    # picks the ticks".
+    #
+    # Used by:
+    #   - every chart flow listed on the class banner
+    ############################################################
+
     def __init__(self, x_data, y_data_list, labels):
-        # Save variables
         self.x_data = x_data
         self.y_data_list = y_data_list
         self.labels = labels
@@ -27,50 +95,35 @@ class BaseChartGenerator:
 
 
 
+
+
+
+    ############################################################
+    # customize_axes
+    ############################################################
+    #
+    # Stages axis styling on the instance — nothing touches
+    # matplotlib until _customize_axes applies it at render
+    # time. When y_lim is omitted the limits are derived
+    # from the data with padding (_find_y_lim_dynamically).
+    #
+    # BUG (documented, not fixed): the x_ticks parameter is
+    # accepted but never stored — only set_x_ticks can set
+    # ticks.
+    #
+    # Used by:
+    #   - all BaseChartGenerator flows listed on the class
+    #     banner
+    #   - generate_lorenz_curves /
+    #     generate_example_lorenz_curve (below), which then
+    #     apply it via _customize_axes
+    ############################################################
+
     def customize_axes(self, x_label: str, y_label: str, title=None, x_formatter=None, y_formatter=None,
                         x_lim=None, y_lim=None, x_ticks=None, y_ticks=None, grid: bool = True):
-        """
-        Customize the axes of the chart.
-
-        This method allows you to set various properties of the chart's axes, including labels, title, formatters, limits,
-        ticks, and grid visibility. It provides flexibility in customizing the appearance and behavior of the chart's axes.
-
-        Parameters:
-        - x_label (str): The label for the x-axis.
-        - y_label (str): The label for the y-axis.
-        - title (str, optional): The title of the chart. Default is None.
-        - x_formatter (Formatter, optional): A formatter for the x-axis. Default is None.
-        - y_formatter (Formatter, optional): A formatter for the y-axis. Default is None.
-        - x_lim (tuple, optional): A tuple specifying the limits for the x-axis (min, max). Default is None.
-        - y_lim (tuple, optional): A tuple specifying the limits for the y-axis (min, max). Default is None.
-        - x_ticks (list, optional): A list of specific tick values to be set on the x-axis. Default is None.
-        - y_ticks (list, optional): A list of specific tick values to be set on the y-axis. Default is None.
-        - grid (bool, optional): A boolean indicating whether to display grid lines. Default is True.
-
-        Behavior:
-        - If y-axis limits (`y_lim`) are not provided, the method will dynamically determine the limits based on the
-          minimum and maximum values of the y_data_list, with some padding applied.
-        - The method sets the provided title, labels, formatters, limits, and ticks for the chart's axes.
-        - If grid is set to True, grid lines will be displayed on the chart.
-
-        Example usage:
-        ```
-        chart_generator.customize_axes(
-            x_label='Time',
-            y_label='Value',
-            title='Sample Chart',
-            x_formatter=mdates.DateFormatter('%Y-%m-%d'),
-            y_formatter=PercentFormatter(),
-            x_lim=(datetime(2020, 1, 1), datetime(2023, 1, 1)),
-            y_lim=(0, 100),
-            x_ticks=['2020-01-01', '2021-01-01', '2022-01-01'],
-            y_ticks=[0, 25, 50, 75, 100],
-            grid=True
-        )
-        ```
-        """
-
-        # If y axis limits are not set, then find min and max values for y_data and apply some padding
+        # DEAD CODE (documented, not fixed): this early y_lim
+        # computation is overwritten by the identical branch at
+        # the end of the method
         if y_lim is None:
             self.y_lim = self._find_y_lim_dynamically(self.y_data_list)
 
@@ -83,7 +136,6 @@ class BaseChartGenerator:
         self.y_ticks = y_ticks
         self.grid = grid
 
-        # Determine y-axis limits
         if y_lim is None:
             self.y_lim = self._find_y_lim_dynamically(self.y_data_list)
         else:
@@ -91,35 +143,36 @@ class BaseChartGenerator:
 
 
 
+
+
+
+    ############################################################
+    # set_x_ticks
+    ############################################################
+    #
+    # Chooses which x positions get ticks: an explicit
+    # x_ticks list wins; otherwise dates whose YYYY-MM-DD
+    # form ends with ends_with are kept. exclude_ends_with
+    # then removes matches (used to thin crowded month
+    # labels).
+    #
+    # GOTCHA: calling with only exclude_ends_with while
+    # self.x_ticks is still None raises TypeError (the
+    # exclusion loop iterates None). Current callers always
+    # pass ends_with, so it never triggers today.
+    #
+    # Used by:
+    #   - generateCoefficientCharts,
+    #     generateOverlappingCoefficientCharts,
+    #     generateCoefficientsOnSingleChart,
+    #     generateGeneralStatisticsCharts
+    #     (blnstats/__init__.py)
+    #   - CompareSources.plot_data
+    #     (blnstats/data_import/compare_sources.py)
+    #   - never called for Lorenz charts (percent axes)
+    ############################################################
+
     def set_x_ticks(self, ends_with=None, x_ticks=None, exclude_ends_with=None):
-        """
-        Set the x-axis ticks for the chart.
-
-        This method allows you to customize the x-axis ticks by either providing specific tick values or by specifying
-        a pattern that the tick values should end with. If both `x_ticks` and `ends_with` are provided, `x_ticks` will
-        take precedence.
-
-        Parameters:
-        - ends_with (str, optional): A string pattern that the x-axis tick values should end with. For example, if 
-          `ends_with` is "-03-01", the x-axis will have ticks at dates ending with "-03-01".
-        - x_ticks (list, optional): A list of specific tick values to be set on the x-axis. If provided, this will 
-          override the `ends_with` parameter.
-        - exclude_ends_with (list, optional): A list of string patterns. Ticks ending with these patterns will be removed.
-
-        Behavior:
-        - If `x_ticks` is provided, it will be used directly to set the x-axis ticks.
-        - If `ends_with` is provided, the method will filter the `x_data` to find dates that match the pattern specified
-          by `ends_with`.
-        - The first and last dates in `x_data` will always be included in the x-axis ticks to ensure the full range of 
-          data is represented.
-
-        Example usage:
-        ```
-        chart_generator.set_x_ticks(ends_with="-03-01")
-        chart_generator.set_x_ticks(x_ticks=["2020-01-01", "2021-01-01"])
-        ```
-        """
-
         if x_ticks:
             self.x_ticks = x_ticks
 
@@ -129,16 +182,17 @@ class BaseChartGenerator:
                 if date.strftime('%Y-%m-%d').endswith(ends_with)
             ]
 
-            # Add first date if not already in x_ticks
+            # First/last data points are forced in so the axis
+            # always shows its true extent
             if self.x_data[0] not in self.x_ticks:
                 self.x_ticks.insert(0, self.x_data[0])
 
-            # Add last date if not already in x_ticks
             if self.x_data[-1] not in self.x_ticks:
                 self.x_ticks.append(self.x_data[-1])
 
 
-        # Exclude ticks based on patterns
+        # Runs on top of whichever branch above filled x_ticks
+        # (TypeError if neither did — see banner)
         if exclude_ends_with:
             self.x_ticks = [
                 date for date in self.x_ticks
@@ -146,6 +200,24 @@ class BaseChartGenerator:
             ]
 
 
+
+
+
+
+    ############################################################
+    # _customize_axes
+    ############################################################
+    #
+    # Applies the staged styling to the live fig/ax. Tick
+    # labels are always rendered as YYYY-MM-DD, so non-date
+    # x_ticks would crash on strftime here — every current
+    # chart is a date series.
+    #
+    # Used by:
+    #   - generate_line_chart (below)
+    #   - generate_lorenz_curves /
+    #     generate_example_lorenz_curve (below)
+    ############################################################
 
     def _customize_axes(self):
         if self.x_label:
@@ -160,48 +232,62 @@ class BaseChartGenerator:
             self.ax.set_xlim(*self.x_lim)
         if self.y_lim:
             self.ax.set_ylim(*self.y_lim)
-        
+
         self.ax.tick_params(axis='both', which='major', labelsize=self.tick_label_fontsize)
-        
+
         if self.x_ticks is not None:
-            # Ensure x_ticks are in the same format as x_data
+            # set_x_ticks may have left strings in x_ticks —
+            # convert in place so set_xticks gets datetimes
             if isinstance(self.x_data[0], datetime):
                 self.x_ticks = [datetime.strptime(tick, '%Y-%m-%d') if isinstance(tick, str) else tick for tick in self.x_ticks]
             self.ax.set_xticks(self.x_ticks)
-            # Optionally set labels
             self.ax.set_xticklabels([tick.strftime('%Y-%m-%d') for tick in self.x_ticks], fontsize=self.tick_label_fontsize)
-        
+
         if self.y_ticks is not None:
             self.ax.set_yticks(self.y_ticks)
             self.ax.set_yticklabels(self.y_ticks, fontsize=self.tick_label_fontsize)
-        
+
         if self.grid:
             self.ax.grid(True)
         self.fig.tight_layout()
 
 
 
-    def _find_y_lim_dynamically(self, y_data_list):
-        '''
-        Finds min and max values for y_data and applies some padding.
 
-        Returns tuple of (overall_y_min, overall_y_max)
-        '''
+
+
+    ############################################################
+    # _find_y_lim_dynamically
+    ############################################################
+    #
+    # (min, max) over all series with 2% padding below and
+    # 25% headroom above — the headroom keeps the
+    # upper-left legend off the curves. A minimum below 20%
+    # of the maximum snaps to 0 so the baseline reads
+    # naturally.
+    #
+    # GOTCHA: an empty/None y_data_list returns
+    # (inf, -inf) — the Lorenz subclass keeps
+    # y_data_list=None and only avoids this because its
+    # flows always pass an explicit y_lim.
+    #
+    # Used by:
+    #   - customize_axes (above) — when y_lim is omitted
+    ############################################################
+
+    def _find_y_lim_dynamically(self, y_data_list):
         overall_y_min = float('inf')
         overall_y_max = float('-inf')
 
-        # Iterate over each y_data to find the overall min and max
         if y_data_list:
             for y_data in y_data_list:
                 current_y_min = min(y_data) - (0.02 * (max(y_data) - min(y_data)))
                 current_y_max = max(y_data) + (0.25 * (max(y_data) - min(y_data)))
-                # current_y_max = max(y_data) + (0.12 * (max(y_data) - min(y_data)))
 
-                # Update overall min and max
                 overall_y_min = min(overall_y_min, current_y_min)
                 overall_y_max = max(overall_y_max, current_y_max)
 
-        # If overall min Y is near 0, then set it to 0
+        # A floor near zero reads better as exactly zero
         if overall_y_min < 0.2 * overall_y_max:
             overall_y_min = 0
 
@@ -209,64 +295,131 @@ class BaseChartGenerator:
 
 
 
+
+
+
+    ############################################################
+    # _add_footer_texts
+    ############################################################
+    #
+    # Copyright bottom-right, generation timestamp
+    # bottom-left. The timestamp makes every regenerated
+    # SVG differ byte-wise even when the data is unchanged.
+    #
+    # Used by:
+    #   - generate_line_chart (below)
+    #   - generate_lorenz_curves /
+    #     generate_example_lorenz_curve (below)
+    ############################################################
+
     def _add_footer_texts(self):
         self.fig.text(0.99, 0.01, '© Vilnius university Kaunas faculty', ha='right', fontsize=self.footer_fontsize)
         self.fig.text(0.01, 0.01, 'Updated: ' + datetime.now().strftime('%Y-%m-%d %H:%M:%S'), ha='left', fontsize=self.footer_fontsize)
 
 
 
+
+
+
+    ############################################################
+    # generate_line_chart
+    ############################################################
+    #
+    # Renders the staged series as a multi-line chart and
+    # returns the SVG as BytesIO (also kept on
+    # self.virtual_file for save_chart). print_header
+    # toggles the title, print_footer the
+    # copyright/timestamp strip — the flows render each
+    # chart repeatedly with these off for embed variants.
+    #
+    # DEAD CODE (documented, not fixed): the (6, 6) figsize
+    # legend special-case — both branches are identical.
+    #
+    # Used by:
+    #   - generateCoefficientCharts,
+    #     generateOverlappingCoefficientCharts,
+    #     generateCoefficientsOnSingleChart,
+    #     generateGeneralStatisticsCharts
+    #     (blnstats/__init__.py)
+    #   - CompareSources.plot_data
+    #     (blnstats/data_import/compare_sources.py)
+    ############################################################
+
     def generate_line_chart(self, figsize=None, print_header=True, print_footer=True):
-        """
-        Generates a line chart with one or multiple lines.
-
-        :param figsize: Figure size tuple (width, height)
-        :param print_header: Whether to print the header (default: True)
-        :param print_footer: Whether to print the footer (default: True)
-        :return: BytesIO object containing the chart image
-        """
-
+        # STEP 1: set up the figure — LaTeX text rendering,
+        # near-zero x margins so curves span the full width
+        # =================================================
         with plt.rc_context({'text.usetex': True, 'font.family': 'serif'}):
-            
-            # Setup plot
+
             self.figsize = figsize
             self.fig, self.ax = plt.subplots(figsize=self.figsize)
 
             self.ax.margins(x=0.01, y=0)
 
-            # Add Header Title
+
+            # STEP 2: optional header title
+            # =============================
             if self.title and print_header:
                 self.ax.set_title(self.title, fontsize=self.title_fontsize)
 
-            # Plot each line
+
+            # STEP 3: one line per series, zipped with labels
+            # ===============================================
             for y_data, label in zip(self.y_data_list, self.labels):
                 self.ax.plot(self.x_data, y_data, label=label)
 
-            # Add legend
+            # Both branches identical — dead special-case,
+            # kept as-is (see banner)
             if(self.figsize == (6, 6)):
                 self.ax.legend(loc='upper left', fontsize=self.legend_fontsize)
             else:
                 self.ax.legend(loc='upper left', fontsize=self.legend_fontsize)
 
-            # Customize axes
+
+            # STEP 4: apply the staged styling, then slant the
+            # date labels for readability
+            # ================================================
             self._customize_axes()
 
-            # Rotate date labels for clarity
             self.fig.autofmt_xdate()
 
-            # Add "Updated" and copyright texts
+
+            # STEP 5: footer strip, reserving 3% of the height
+            # for it in the layout
+            # ================================================
             if print_footer:
                 self._add_footer_texts()
 
-            # Adjust layout to minimize gaps
             gap_bottom = 0.03 if print_footer else 0.0
             self.fig.tight_layout(rect=[0, gap_bottom, 1, 1])
 
-            # Save the chart to a virtual file
+
+            # STEP 6: serialize to SVG and hand the buffer back
+            # =================================================
             self.virtual_file = self.get_virtual_file()
 
             return self.virtual_file
 
 
+
+
+
+
+    ############################################################
+    # get_virtual_file
+    ############################################################
+    #
+    # Serializes the current figure to an in-memory SVG and
+    # CLOSES it — nothing can be drawn afterwards. SVG
+    # keeps the LaTeX text crisp at any zoom (a dpi=1000
+    # PNG export was tried and dropped — see the commented
+    # line).
+    #
+    # Used by:
+    #   - generate_line_chart (above)
+    #   - generate_lorenz_curves /
+    #     generate_example_lorenz_curve (below)
+    ############################################################
 
     def get_virtual_file(self):
         virtual_file = io.BytesIO()
@@ -278,13 +431,24 @@ class BaseChartGenerator:
 
 
 
-    def save_chart(self, filename: str):
-        """
-        Saves the chart image to a file.
 
-        :param filename: The filename to save the chart as
-        :return: The path to the saved chart file
-        """
+
+
+    ############################################################
+    # save_chart
+    ############################################################
+    #
+    # Writes the last rendered SVG (self.virtual_file) to
+    # disk, creating the target folder. Only valid after a
+    # generate_* call — virtual_file does not exist before.
+    #
+    # Used by:
+    #   - every chart flow listed on the class banner —
+    #     each figsize/header/footer variant is saved right
+    #     after its generate_* call
+    ############################################################
+
+    def save_chart(self, filename: str):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, 'wb') as f:
             f.write(self.virtual_file.getbuffer())
@@ -297,20 +461,60 @@ class BaseChartGenerator:
 
 
 
+############################################################
+# LorenzCurveChartGenerator
+############################################################
+#
+# Lorenz-curve charts (cumulative % of population vs
+# cumulative % of wealth) on 0-100 percent axes, plus the
+# dashed perfect-equality diagonal. datasets is a list of
+# dicts with 'percentiles', 'cumulative_percentages' and
+# 'label' keys, prepared by generateLorenzCharts.
+#
+# GOTCHA: __init__ does NOT call super().__init__ —
+# x_data/labels never exist and y_data_list stays None, so
+# inherited helpers that touch them (set_x_ticks,
+# _find_y_lim_dynamically) only work because the Lorenz
+# flows never reach those paths (explicit y_lim, no tick
+# filtering).
+#
+# Used by:
+#   - generateLorenzCharts (blnstats/__init__.py)
+#   - generateExampleLorenzCharts (blnstats/__init__.py)
+############################################################
+
 class LorenzCurveChartGenerator(BaseChartGenerator):
+    # Percent axes carry long labels — shrink them from the
+    # base class's 24
     x_label_fontsize = 20
     y_label_fontsize = 20
 
 
-    def __init__(self, datasets=None, title=None, x_label=None, y_label=None):
 
-        # Save variables
-        # self.x_data = x_data
-        # self.y_data_list = y_data_list
-        # self.labels = labels
+
+
+
+    ############################################################
+    # __init__
+    ############################################################
+    #
+    # Stores the datasets and chart texts. Everything is
+    # optional: generateExampleLorenzCharts constructs with
+    # no arguments at all (the example chart synthesizes
+    # its own curve). y_data_list is only a placeholder so
+    # the attribute exists for inherited code — it stays
+    # None (see the class banner GOTCHA).
+    #
+    # Used by:
+    #   - generateLorenzCharts / generateExampleLorenzCharts
+    #     (blnstats/__init__.py)
+    ############################################################
+
+    def __init__(self, datasets=None, title=None, x_label=None, y_label=None):
+        # Deliberately no super().__init__ — there is no
+        # single x/y series here
         self.x_ticks = None
 
-        # Save Lorenz specific variables
         self.title = title
         self.x_label = x_label
         self.y_label = y_label
@@ -320,29 +524,49 @@ class LorenzCurveChartGenerator(BaseChartGenerator):
 
 
 
+
+
+    ############################################################
+    # _plot_perfect_equality_line
+    ############################################################
+    #
+    # Draws the dashed 0-100 diagonal and its label. The
+    # label angle is computed from the axes' DISPLAY aspect
+    # ratio (plt.draw() first forces transforms current) so
+    # the text hugs the diagonal even on non-square
+    # figures.
+    #
+    # Used by:
+    #   - generate_lorenz_curves /
+    #     generate_example_lorenz_curve (below) — called
+    #     after tight_layout so the angle matches the final
+    #     geometry
+    ############################################################
+
     def _plot_perfect_equality_line(self):
         plt.plot([0, 100], [0, 100], 'k--')
 
-        # Force the plot to update transformations
+        # Force the plot to update transformations before
+        # measuring the axes
         plt.draw()
 
-        # Get axes limits
         xlim = self.ax.get_xlim()
         ylim = self.ax.get_ylim()
 
-        # Get axes size in display coordinates
+        # Axes size in display coordinates (inches)
         bbox = self.ax.get_window_extent().transformed(plt.gcf().dpi_scale_trans.inverted())
         width_display, height_display = bbox.width, bbox.height
 
-        # Calculate the scaling factors
+        # Data-to-display scaling per axis
         xscale = width_display / (xlim[1] - xlim[0])
         yscale = height_display / (ylim[1] - ylim[0])
 
-        # Compute the angle of the perfect equality line in display coordinates
+        # Angle of the diagonal as actually displayed
         angle_rad = np.arctan2(yscale * (ylim[1] - ylim[0]), xscale * (xlim[1] - xlim[0]))
         angle_deg = np.degrees(angle_rad)
 
-        # Place the text with the calculated angle
+        # Slightly above the line (y=55) so the text does not
+        # sit on the dashes
         self.ax.text(50, 55, 'Perfect Equality Line',
                 rotation=angle_deg,
                 ha='center', va='center',
@@ -352,29 +576,44 @@ class LorenzCurveChartGenerator(BaseChartGenerator):
 
 
 
+
+
+    ############################################################
+    # generate_lorenz_curves
+    ############################################################
+    #
+    # Renders one Lorenz curve per dataset on percent axes
+    # and returns the SVG BytesIO. Plots through the pyplot
+    # state machine (plt.plot/plt.legend) rather than
+    # self.ax — works only because the figure created here
+    # is the current one.
+    #
+    # Used by:
+    #   - generateLorenzCharts (blnstats/__init__.py) —
+    #     full and headerless/footerless variants per
+    #     figsize
+    ############################################################
+
     def generate_lorenz_curves(self, figsize=None, print_header=True, print_footer=True):
-        """
-        Generates Lorenz curves for one or multiple datasets.
-
-        :param figsize: Figure size tuple (width, height)
-        :param print_header: Whether to print the header (default: True)
-        :param print_footer: Whether to print the footer (default: True)
-        :return: BytesIO object containing the chart image
-        """
-
+        # STEP 1: set up the figure — LaTeX text rendering,
+        # near-zero x margins
+        # =================================================
         with plt.rc_context({'text.usetex': True, 'font.family': 'serif'}):
-            # Setup plot
+
             self.figsize = figsize
             self.fig, self.ax = plt.subplots(figsize=self.figsize)
 
-
             self.ax.margins(x=0.01, y=0)
 
-            # Add Header Title
+
+            # STEP 2: optional header title
+            # =============================
             if self.title and print_header:
                 self.ax.set_title(self.title, fontsize=self.title_fontsize)
 
 
+            # STEP 3: one curve per dataset
+            # =============================
             for data in self.datasets:
                 percentiles = data['percentiles']
                 cumulative_percentages = data['cumulative_percentages']
@@ -382,7 +621,9 @@ class LorenzCurveChartGenerator(BaseChartGenerator):
                 plt.plot(percentiles, cumulative_percentages, label=label)
 
 
-            # Customize axes
+            # STEP 4: fixed 0-100 percent axes, staged then
+            # applied
+            # =============================================
             self.customize_axes(
                 x_label=self.x_label,
                 y_label=self.y_label,
@@ -395,24 +636,31 @@ class LorenzCurveChartGenerator(BaseChartGenerator):
             )
             self._customize_axes()
 
-            # Legend
+            # The small square variant gets a smaller legend so
+            # it does not cover the curves
             if(self.figsize == (6, 6)):
                 plt.legend(loc='upper left', fontsize=11)
             else:
                 plt.legend(loc='upper left', fontsize=self.legend_fontsize)
-            
-            # Add "Updated" and copyright texts
+
+
+            # STEP 5: footer strip and layout
+            # ===============================
             if print_footer:
                 self._add_footer_texts()
 
-            # Adjust layout to minimize gaps
             gap_bottom = 0.03 if print_footer else 0.0
             self.fig.tight_layout(rect=[0, gap_bottom, 1, 1])
 
-            # Draw perfect equality line
+
+            # STEP 6: equality diagonal AFTER tight_layout so
+            # its label angle matches the final axes geometry
+            # ===============================================
             self._plot_perfect_equality_line()
 
-            # Save the chart to a virtual file
+
+            # STEP 7: serialize to SVG and hand the buffer back
+            # =================================================
             self.virtual_file = self.get_virtual_file()
 
             return self.virtual_file
@@ -420,26 +668,47 @@ class LorenzCurveChartGenerator(BaseChartGenerator):
 
 
 
+
+
+    ############################################################
+    # generate_example_lorenz_curve
+    ############################################################
+    #
+    # Textbook illustration chart: a synthetic Lorenz curve
+    # (x/100)^4, hatched A/B areas and a "Gini Coefficient"
+    # label — no real data involved.
+    #
+    # BUG (documented, not fixed): print_header is accepted
+    # but never used — unlike the other generators nothing
+    # calls ax.set_title here, so the 'Lorenz Curve
+    # Example' title staged via customize_axes is never
+    # drawn.
+    #
+    # Used by:
+    #   - generateExampleLorenzCharts (blnstats/__init__.py)
+    ############################################################
+
     def generate_example_lorenz_curve(self, figsize=None, print_header=True, print_footer=True):
-        """
-        Generates an example Lorenz curve with annotations.
-
-        :param figsize: Figure size tuple (width, height)
-        :return: BytesIO object containing the chart image
-        """
-
+        # STEP 1: set up the figure — LaTeX text rendering
+        # ================================================
         with plt.rc_context({'text.usetex': True, 'font.family': 'serif'}):
 
-            # Setup plot
             self.figsize = figsize
             self.fig, self.ax = plt.subplots(figsize=self.figsize)
 
-            # Lorenz curve example
+
+            # STEP 2: synthetic curve — (x/100)^4 bows the
+            # example nicely away from the diagonal
+            # ============================================
             x_lorenz = np.linspace(0, 100, 100)
             y_lorenz = (x_lorenz / 100) ** 4 * 100
             self.ax.plot(x_lorenz, y_lorenz, label='Lorenz Curve', linewidth=3, color='black')
 
-            # Fill areas
+
+            # STEP 3: hatched areas — A between the equality
+            # line and the curve, B under the curve — plus
+            # labels on white patches so hatching stays legible
+            # =================================================
             self.ax.fill_between(x_lorenz, y_lorenz, x_lorenz, hatch='///\\\\\\', edgecolor='black', facecolor='white')
             self.ax.text(55, 35, 'Gini Coefficient', ha='center', va='center', fontsize=15,
                     bbox=dict(facecolor='white', alpha=1))
@@ -448,7 +717,10 @@ class LorenzCurveChartGenerator(BaseChartGenerator):
             self.ax.fill_between(x_lorenz, y_lorenz, hatch='++', edgecolor='black', facecolor='white')
             self.ax.text(85, 25, 'B', ha='center', va='center', fontsize=25, bbox=dict(facecolor='white', alpha=1))
 
-            # Customize axes
+
+            # STEP 4: percent axes; the title staged here is
+            # never drawn (see banner)
+            # ==============================================
             self.customize_axes(
                 x_label='Cumulative Percentage of Population',
                 y_label='Cumulative Percentage of Wealth',
@@ -462,22 +734,24 @@ class LorenzCurveChartGenerator(BaseChartGenerator):
             self._customize_axes()
             self.ax.legend(loc='upper left', fontsize=15)
 
-            # Add "Updated" and copyright texts
+
+            # STEP 5: footer strip and layout
+            # ===============================
             if print_footer:
                 self._add_footer_texts()
 
-            # Adjust layout to minimize gaps
             gap_bottom = 0.03 if print_footer else 0.0
             self.fig.tight_layout(rect=[0, gap_bottom, 1, 1])
 
-            # Draw perfect equality line
+
+            # STEP 6: equality diagonal AFTER tight_layout so
+            # its label angle matches the final axes geometry
+            # ===============================================
             self._plot_perfect_equality_line()
 
-            # Save the chart to a virtual file
+
+            # STEP 7: serialize to SVG and hand the buffer back
+            # =================================================
             self.virtual_file = self.get_virtual_file()
 
             return self.virtual_file
-
-
-
-
