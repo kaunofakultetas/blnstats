@@ -519,17 +519,19 @@ class TestDispatcherAndSeries(unittest.TestCase):
 # TestKnownMetricBugs
 ############################################################
 #
-# Each test asserts the CORRECT scientific behavior and is
-# decorated @unittest.expectedFailure because the current
-# code gets it wrong. The suite stays green; fixing a metric
-# flips its test to "unexpected success" so the change (and
-# its effect on published series) must be acknowledged by
+# Each test asserts the CORRECT scientific behavior. The
+# top-10% cases are FIXED (never-empty decile + zero-total
+# guard, values for n >= 10 unchanged) and now guard
+# against regression. The Nakamoto cutoff stays pinned
+# under @unittest.expectedFailure — fixing it changes
+# published series, so the fix must be acknowledged by
 # removing the decorator.
 #
 #   test_nakamoto_between_50_and_51_percent — 0.51 cutoff
-#   test_top10_small_network_controls_something — n<10 -> 0
-#   test_top10_sum_small_network — same hole, sum variant
-#   test_top10_all_zero_is_zero — 0/0 -> nan
+#     (expectedFailure, pending review)
+#   test_top10_small_network_controls_something — fixed
+#   test_top10_sum_small_network                — fixed
+#   test_top10_all_zero_is_zero                 — fixed
 ############################################################
 
 class TestKnownMetricBugs(unittest.TestCase):
@@ -580,15 +582,11 @@ class TestKnownMetricBugs(unittest.TestCase):
     ############################################################
     #
     # Proves: in any nonempty network the top decile controls
-    # MORE than nothing — with n<10, floor(0.1*n)=0 currently
-    # selects zero holders and reports 0.0, i.e. "the top 10%
-    # controls 0% of capacity", which is factually wrong for
-    # every network under 10 nodes. (The exact small-n
-    # convention — ceil vs. weighted — is the researcher's
-    # call; any of them satisfies this assertion.)
+    # MORE than nothing — for n < 10 the decile is the single
+    # largest holder (max(1, floor(0.1*n))), never an empty
+    # set reporting "0% of capacity".
     ############################################################
 
-    @unittest.expectedFailure
     def test_top10_small_network_controls_something(self):
         self.assertGreater(self.c.calculate_top_10_percent_control_percentage([100, 1, 1, 1]), 0.0)
 
@@ -601,12 +599,11 @@ class TestKnownMetricBugs(unittest.TestCase):
     # test_top10_sum_small_network
     ############################################################
     #
-    # Proves: same hole through the sum variant — the top
-    # decile of [100,1,1,1] must control at least the largest
-    # holder's 100, not 0.
+    # Proves: the sum variant follows the same rule — the top
+    # decile of [100,1,1,1] controls at least the largest
+    # holder's 100.
     ############################################################
 
-    @unittest.expectedFailure
     def test_top10_sum_small_network(self):
         self.assertGreaterEqual(self.c.calculate_top_10_percent_control_sum([100, 1, 1, 1]), 100)
 
@@ -620,12 +617,10 @@ class TestKnownMetricBugs(unittest.TestCase):
     ############################################################
     #
     # Proves: an all-zero network follows the same degenerate
-    # convention as every other metric (-> 0.0). Currently the
-    # share divides 0/0 and returns numpy nan, which poisons
-    # any downstream aggregation.
+    # convention as every other metric (-> 0.0) instead of
+    # dividing 0/0 into numpy nan.
     ############################################################
 
-    @unittest.expectedFailure
     def test_top10_all_zero_is_zero(self):
         self.assertEqual(self.c.calculate_top_10_percent_control_percentage([0] * 12), 0.0)
 

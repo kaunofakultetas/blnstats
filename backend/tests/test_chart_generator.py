@@ -5,12 +5,12 @@
 #  DB: a real LaTeX-rendered SVG for the line chart and the
 #  example Lorenz curve (slow — LaTeX runs per chart, only
 #  three renders total), the tick-selection and dynamic
-#  y-limit logic, and — under @unittest.expectedFailure —
-#  every chart bug found during the restyle: the ignored
-#  x_ticks parameter, the exclude-only TypeError, the
-#  excluded forced endpoint, the (inf,-inf) empty y-limits,
-#  the inverted limits on negative data, and the example
-#  curve's never-drawn title. Title assertions read the
+#  y-limit logic, and regression guards for the chart bugs
+#  found during the restyle — all FIXED: the x_ticks
+#  parameter is stored, exclusion-only calls filter the
+#  full series, forced endpoint ticks survive exclusion,
+#  degenerate y-limits stay finite and ordered, and the
+#  example curve draws its title. Title assertions read the
 #  matplotlib Axes object, not the SVG — usetex outputs
 #  text as paths, so the SVG carries no literal strings.
 #
@@ -41,9 +41,9 @@ DATES = [datetime(2018, 2, 1), datetime(2018, 3, 1), datetime(2018, 4, 1)]
 #   test_ends_with_selects_and_forces_endpoints — the
 #     documented selection + forced-extent behavior
 #   test_explicit_ticks_win
-#   test_customize_axes_x_ticks_ignored   (expectedFailure)
-#   test_exclude_only_raises              (expectedFailure)
-#   test_exclusion_removes_forced_endpoint(expectedFailure)
+#   test_customize_axes_x_ticks_stored
+#   test_exclude_only_filters_full_series
+#   test_exclusion_keeps_forced_endpoints
 ############################################################
 
 class TestTickSelection(unittest.TestCase):
@@ -108,17 +108,15 @@ class TestTickSelection(unittest.TestCase):
 
 
     ############################################################
-    # test_customize_axes_x_ticks_ignored
+    # test_customize_axes_x_ticks_stored
     ############################################################
     #
-    # Proves (intended contract): passing x_ticks to
-    # customize_axes should set the ticks like every other
-    # parameter of that method. Currently the parameter is
-    # accepted and silently dropped — only set_x_ticks works.
+    # Proves: x_ticks passed to customize_axes is stored like
+    # every other parameter of that method (it used to be
+    # silently dropped).
     ############################################################
 
-    @unittest.expectedFailure
-    def test_customize_axes_x_ticks_ignored(self):
+    def test_customize_axes_x_ticks_stored(self):
         self.gen.customize_axes('X', 'Y', x_ticks=[DATES[1]])
         self.assertEqual(self.gen.x_ticks, [DATES[1]])
 
@@ -128,19 +126,17 @@ class TestTickSelection(unittest.TestCase):
 
 
     ############################################################
-    # test_exclude_only_raises
+    # test_exclude_only_filters_full_series
     ############################################################
     #
-    # Proves (intended contract): exclusion without a prior
-    # selection should act on the full date series (or fail
-    # with a clear message). Currently it iterates
-    # self.x_ticks = None and dies with a bare TypeError.
+    # Proves: exclusion without a prior selection acts on the
+    # full date series (it used to die on a bare TypeError
+    # iterating x_ticks = None).
     ############################################################
 
-    @unittest.expectedFailure
-    def test_exclude_only_raises(self):
+    def test_exclude_only_filters_full_series(self):
         self.gen.set_x_ticks(exclude_ends_with=['-02-01'])
-        self.assertIsNotNone(self.gen.x_ticks)
+        self.assertEqual(self.gen.x_ticks, [DATES[1], DATES[2]])
 
 
 
@@ -148,23 +144,20 @@ class TestTickSelection(unittest.TestCase):
 
 
     ############################################################
-    # test_exclusion_removes_forced_endpoint
+    # test_exclusion_keeps_forced_endpoints
     ############################################################
     #
-    # Proves (intended contract): the forced first/last ticks
-    # exist so "the axis always shows its true extent" — the
-    # exclusion pass runs afterwards and silently removes them
-    # again when they match a pattern. This actually happens
-    # in production: generateCoefficientsOnSingleChart
-    # excludes '-02-01' while its series starts 2018-02-01.
-    # Design call for review: either endpoints survive
-    # exclusion, or the forced-extent comment is wrong.
+    # Proves: the first/last data points are forced in AFTER
+    # the exclusion pass, so the axis always shows its true
+    # extent. This fires in production —
+    # generateCoefficientsOnSingleChart excludes '-02-01'
+    # while its series starts 2018-02-01, and that start label
+    # used to vanish from every published chart.
     ############################################################
 
-    @unittest.expectedFailure
-    def test_exclusion_removes_forced_endpoint(self):
+    def test_exclusion_keeps_forced_endpoints(self):
         self.gen.set_x_ticks(ends_with='-03-01', exclude_ends_with=['-02-01'])
-        self.assertIn(DATES[0], self.gen.x_ticks)
+        self.assertEqual(self.gen.x_ticks, DATES)  # match + both endpoints back in
 
 
 
@@ -180,8 +173,8 @@ class TestTickSelection(unittest.TestCase):
 #   test_known_padding          — 2% below, 25% headroom,
 #                                 near-zero floor snaps to 0
 #   test_explicit_limit_wins
-#   test_empty_data_is_finite         (expectedFailure)
-#   test_negative_data_limits_ordered (expectedFailure)
+#   test_empty_data_is_finite         — the (0, 1) fallback
+#   test_negative_data_limits_ordered — no zero snap below 0
 ############################################################
 
 class TestDynamicYLimits(unittest.TestCase):
@@ -250,17 +243,13 @@ class TestDynamicYLimits(unittest.TestCase):
     # test_empty_data_is_finite
     ############################################################
     #
-    # Proves (intended contract): no data must still yield
-    # FINITE limits — currently returns (inf, -inf), which
-    # matplotlib turns into a broken axis. The Lorenz subclass
-    # dodges this only by always passing explicit limits.
+    # Proves: no data yields the neutral (0, 1) default
+    # instead of (inf, -inf) and a broken matplotlib axis.
     ############################################################
 
-    @unittest.expectedFailure
     def test_empty_data_is_finite(self):
-        low, high = self.gen._find_y_lim_dynamically([])
-        self.assertTrue(low < high)
-        self.assertNotEqual(low, float('inf'))
+        self.assertEqual(self.gen._find_y_lim_dynamically([]), (0, 1))
+        self.assertEqual(self.gen._find_y_lim_dynamically(None), (0, 1))
 
 
 
@@ -271,18 +260,17 @@ class TestDynamicYLimits(unittest.TestCase):
     # test_negative_data_limits_ordered
     ############################################################
     #
-    # Proves (intended contract): limits must satisfy
-    # low <= high for ANY input. For all-negative series the
-    # near-zero floor snaps the minimum to 0 ABOVE the padded
-    # maximum (e.g. [-10,-5] -> (0, -3.75)), inverting the
-    # axis. Latent — every current chart series is
-    # non-negative.
+    # Proves: limits satisfy low <= high for ANY input — the
+    # near-zero floor snap only applies when the chart rises
+    # above zero, so an all-negative series keeps its padded
+    # ordered limits instead of inverting the axis.
     ############################################################
 
-    @unittest.expectedFailure
     def test_negative_data_limits_ordered(self):
         low, high = self.gen._find_y_lim_dynamically([[-10, -5]])
         self.assertLessEqual(low, high)
+        self.assertAlmostEqual(low, -10.1, places=12)
+        self.assertAlmostEqual(high, -3.75, places=12)
 
 
 
@@ -299,8 +287,8 @@ class TestDynamicYLimits(unittest.TestCase):
 #
 #   test_line_chart_renders    — SVG bytes + title + legend
 #   test_line_chart_no_header  — title suppressed
-#   test_example_lorenz_title  — staged title never drawn
-#                                (expectedFailure)
+#   test_example_lorenz_title  — title drawn when the
+#                                header is on
 ############################################################
 
 class TestRenderPath(unittest.TestCase):
@@ -359,15 +347,12 @@ class TestRenderPath(unittest.TestCase):
     # test_example_lorenz_title
     ############################################################
     #
-    # Proves (intended contract): the example Lorenz curve
-    # stages 'Lorenz Curve Example' via customize_axes and the
-    # print_header parameter suggests it should be drawn — but
-    # no set_title call ever happens, so the published example
-    # SVG has no title. (print_header is also accepted and
-    # ignored.)
+    # Proves: the example Lorenz curve draws its staged
+    # 'Lorenz Curve Example' title when print_header is on —
+    # the same header contract as the other generators (the
+    # published example SVG used to ship untitled).
     ############################################################
 
-    @unittest.expectedFailure
     def test_example_lorenz_title(self):
         gen = LorenzCurveChartGenerator()
         buffer = gen.generate_example_lorenz_curve(figsize=(6, 6), print_header=True)

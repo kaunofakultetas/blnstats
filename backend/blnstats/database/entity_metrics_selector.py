@@ -57,12 +57,12 @@ class EntityMetricsSelector:
     # value: summed count}]}. One query per block height
     # (N+1 by design — each is a cheap indexed cache read).
     # Caveats:
-    #   - LEFT JOIN: a cached node missing from
-    #     Lightning_Entities yields EntityName NULL and
-    #     VerticeData(name=None) then fails pydantic
-    #     validation. Only possible when the entity import
-    #     lags the cache — entity_clusters backfills every
-    #     channel endpoint with a hex-prefix name.
+    #   - LEFT JOIN + COALESCE: a cached node missing from
+    #     Lightning_Entities (entity import lagging the
+    #     cache) stands as its own entity under its NodeID
+    #     — mirroring the hex-prefix placeholder
+    #     entity_clusters would assign it, instead of all
+    #     such nodes collapsing into one NULL group.
     #   - counts are endpoint-based: a channel between two
     #     nodes of the SAME entity counts twice for it.
     #   - a block height absent from the cache silently
@@ -98,16 +98,16 @@ class EntityMetricsSelector:
                 for blockHeight in blockHeights:
                     
                     db_cursor.execute('''
-                        SELECT 
-                            Lightning_Entities.EntityName,
+                        SELECT
+                            COALESCE(Lightning_Entities.EntityName, _CACHED1_NodeMetrics.NodeID) AS EntityName,
                             SUM(_CACHED1_NodeMetrics.ChannelCount) AS ChannelCount
                         FROM
                             _CACHED1_NodeMetrics
-                        LEFT JOIN Lightning_Entities 
+                        LEFT JOIN Lightning_Entities
                             ON _CACHED1_NodeMetrics.NodeID = Lightning_Entities.NodeID
-                        WHERE 
+                        WHERE
                             BlockHeight = %s
-                        GROUP BY Lightning_Entities.EntityName
+                        GROUP BY COALESCE(Lightning_Entities.EntityName, _CACHED1_NodeMetrics.NodeID)
                     ''',
                         (blockHeight,)
                     )
@@ -142,8 +142,8 @@ class EntityMetricsSelector:
     # entity's endpoint-credited capacity in sats (channels
     # between two nodes of the same entity count twice;
     # generateCSV_EntityMetrics divides by 1e8 for BTC).
-    # Same N+1 pattern, LEFT JOIN NULL caveat and
-    # empty-list behavior as above.
+    # Same N+1 pattern, COALESCE fallback and empty-list
+    # behavior as above.
     #
     # Used by (all in blnstats/__init__.py):
     #   - the "Entities" branches of
@@ -175,16 +175,16 @@ class EntityMetricsSelector:
                 for blockHeight in blockHeights:
                     
                     db_cursor.execute('''
-                        SELECT 
-                            Lightning_Entities.EntityName,
+                        SELECT
+                            COALESCE(Lightning_Entities.EntityName, _CACHED1_NodeMetrics.NodeID) AS EntityName,
                             SUM(_CACHED1_NodeMetrics.Capacity) AS Capacity
                         FROM
                             _CACHED1_NodeMetrics
-                        LEFT JOIN Lightning_Entities 
+                        LEFT JOIN Lightning_Entities
                             ON _CACHED1_NodeMetrics.NodeID = Lightning_Entities.NodeID
-                        WHERE 
+                        WHERE
                             BlockHeight = %s
-                        GROUP BY Lightning_Entities.EntityName
+                        GROUP BY COALESCE(Lightning_Entities.EntityName, _CACHED1_NodeMetrics.NodeID)
                     ''',
                         (blockHeight,)
                     )

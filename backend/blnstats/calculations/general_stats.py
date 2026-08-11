@@ -63,7 +63,12 @@ class GeneralStats:
     #
     # Both sums divide by 2 because every channel is
     # reported at both endpoints; capacity additionally
-    # divides by 1e8 (satoshis -> BTC).
+    # divides by 1e8 (satoshis -> BTC). An ODD channel-
+    # endpoint sum is impossible for a complete snapshot,
+    # so it raises ValueError naming the block height —
+    # the same missing endpoint would silently corrupt the
+    # capacity sum too, so refusing to publish beats
+    # emitting half a channel.
     #
     # Used by:
     #   - generateGeneralStatisticsCharts
@@ -72,9 +77,10 @@ class GeneralStats:
 
     def calculate(self, vertices_capacity_data: VerticesAspectDataStructure, vertices_channel_count_data: VerticesAspectDataStructure):
         # STEP 1: consistency guard — expected yAxis labels,
-        # equal length, same first/last block height. NOTE: a
-        # mid-series height mismatch slips through, only the
-        # endpoints are compared.
+        # equal length, same first/last block height, and a
+        # full key-list comparison so mid-series mismatches
+        # cannot pair one block's capacity with another
+        # block's channel count
         # ===================================================
         if(vertices_capacity_data.meta.yAxis != "List(NodeID,Capacity)"):
             raise ValueError("VerticesCapacityDataStructure must have a yAxis of 'List(NodeID,Capacity)'")
@@ -86,6 +92,8 @@ class GeneralStats:
             raise ValueError("VerticesCapacityDataStructure and VerticesChannelCountDataStructure must start with the same block height")
         if(list(vertices_capacity_data.data.keys())[-1] != list(vertices_channel_count_data.data.keys())[-1]):
             raise ValueError("VerticesCapacityDataStructure and VerticesChannelCountDataStructure must end with the same block height")
+        if(list(vertices_capacity_data.data.keys()) != list(vertices_channel_count_data.data.keys())):
+            raise ValueError("VerticesCapacityDataStructure and VerticesChannelCountDataStructure must cover the same block heights in the same order")
 
 
         # STEP 2: unzip the per-height series the structure
@@ -105,9 +113,17 @@ class GeneralStats:
                 for vertices_entry in vertices_capacity_data.data.values()]
 
         # STEP 2.2: channel count — /2 for the same
-        # both-endpoints double-report reason
-        channel_count_sum_data = [sum(vertice.value / 2 for vertice in vertices_entry.vertices)
-                for vertices_entry in vertices_channel_count_data.data.values()]
+        # both-endpoints double-report reason. An odd endpoint
+        # sum means a channel is missing one endpoint (an
+        # incomplete cache) — refuse to publish rather than
+        # emit a physically impossible half channel
+        channel_count_sum_data = []
+        for block_height, vertices_entry in vertices_channel_count_data.data.items():
+            endpoint_sum = sum(vertice.value for vertice in vertices_entry.vertices)
+            if endpoint_sum % 2 != 0:
+                raise ValueError(f"Odd channel-endpoint sum ({endpoint_sum}) at block height {block_height} — "
+                                 f"a channel is missing one endpoint, the node-metrics cache is likely incomplete")
+            channel_count_sum_data.append(endpoint_sum // 2)
 
 
         # STEP 3: assemble the structure
@@ -263,9 +279,8 @@ class GeneralStats:
     # Single-value companion of the histogram: AVG(lifetime
     # in blocks) computed by SQL, written to
     # channel_lifetime_average.json in blocks and days
-    # (/144). Returns the raw SQL value — a Decimal, or
-    # None on an empty table — even though the JSON payload
-    # already coerces to float.
+    # (/144). Returns the same float it writes into the
+    # JSON (0 on an empty table).
     #
     # NOTE (inconsistency, documented not fixed): this
     # WHERE lacks the histogram query's
@@ -326,4 +341,4 @@ class GeneralStats:
                 os.makedirs('/DATA/GENERATED/General_Stats/Channel_Lifetime', exist_ok=True)
                 with open('/DATA/GENERATED/General_Stats/Channel_Lifetime/channel_lifetime_average.json', 'w') as f:
                     json.dump(data, f, indent=4)
-                return result['AverageChannelLifetime']
+                return avg_lifetime

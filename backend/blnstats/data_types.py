@@ -345,6 +345,12 @@ class CoefficientsDataStructure(BaseBLNDataStructure):
 class GeneralStatsDataStructure(BaseBLNDataStructure):
 
     # One point: the three network totals for that block.
+    # channel_count stays int ON PURPOSE: half a channel is
+    # physically impossible (every channel has exactly two
+    # endpoints), so GeneralStats.calculate validates the
+    # endpoint-sum parity and raises a diagnostic error
+    # before a fractional count could ever reach this
+    # structure.
     class GeneralStatsData(BaseModel):
         date: str
         timestamp: int

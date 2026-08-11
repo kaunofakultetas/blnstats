@@ -8,12 +8,13 @@
 #  wipes the data tables first, seeds its own fixture rows,
 #  and asserts the actual SQL semantics: the date-mask
 #  wildcard, the funding/spending activity window and its
-#  boundary, endpoint double-crediting, the entity GROUP BY,
-#  and — as expectedFailures — the LEFT JOIN NULL entity
-#  crash and the average-vs-histogram population mismatch,
-#  now demonstrated with live numbers instead of source
-#  text. Skips cleanly when no DB is reachable (plain
-#  unit-test runs).
+#  boundary, endpoint double-crediting, and the entity
+#  GROUP BY with its COALESCE fallback (fixed — a node
+#  without an entity row stands as its own entity). The one
+#  remaining expectedFailure demonstrates the
+#  average-vs-histogram population mismatch with live
+#  numbers instead of source text. Skips cleanly when no DB
+#  is reachable (plain unit-test runs).
 #
 #  Used by:
 #    - runTests.sh (repo root) — "python3 -m unittest
@@ -341,8 +342,8 @@ class TestActivityWindow(DBFixture):
 ############################################################
 #
 #   test_group_by_entity — nodes of one entity sum together
-#   test_missing_entity_row_survives (expectedFailure) — the
-#     LEFT JOIN NULL crash
+#   test_missing_entity_row_survives — the COALESCE fallback
+#     names an entity-less node after its NodeID
 ############################################################
 
 class TestEntityAggregation(DBFixture):
@@ -380,20 +381,22 @@ class TestEntityAggregation(DBFixture):
     # test_missing_entity_row_survives
     ############################################################
     #
-    # Proves (intended contract): a cached node with NO
-    # Lightning_Entities row — possible whenever the entity
-    # import lags the cache rebuild — must not kill the
-    # selector. The LEFT JOIN yields EntityName NULL and
-    # VerticeData(name=None) dies in pydantic validation.
+    # Proves: a cached node with NO Lightning_Entities row —
+    # possible whenever the entity import lags the cache
+    # rebuild — stands as its own entity under its NodeID
+    # (COALESCE fallback) instead of the LEFT JOIN's NULL
+    # name dying in pydantic validation.
     ############################################################
 
-    @unittest.expectedFailure
     def test_missing_entity_row_survives(self):
         self.seed_block(500, '2018-03-01')
         self.seed_cache(500, 'node1', 2, 100)  # deliberately no seed_entity
 
         result = EntityMetricsSelector().get_channel_count_metrics(self.heights_structure([500]))
-        self.assertEqual(len(result.data['500'].vertices), 1)
+        vertices = result.data['500'].vertices
+        self.assertEqual(len(vertices), 1)
+        self.assertEqual(vertices[0].name, 'node1')
+        self.assertEqual(vertices[0].value, 2)
 
 
 

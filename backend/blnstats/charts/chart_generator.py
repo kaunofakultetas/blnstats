@@ -107,9 +107,9 @@ class BaseChartGenerator:
     # time. When y_lim is omitted the limits are derived
     # from the data with padding (_find_y_lim_dynamically).
     #
-    # BUG (documented, not fixed): the x_ticks parameter is
-    # accepted but never stored — only set_x_ticks can set
-    # ticks.
+    # x_ticks given here behaves like an explicit
+    # set_x_ticks list; when omitted, previously staged
+    # ticks survive untouched.
     #
     # Used by:
     #   - all BaseChartGenerator flows listed on the class
@@ -136,6 +136,11 @@ class BaseChartGenerator:
         self.y_ticks = y_ticks
         self.grid = grid
 
+        # only when given — a bare customize_axes call must not
+        # clobber ticks staged via set_x_ticks
+        if x_ticks is not None:
+            self.x_ticks = x_ticks
+
         if y_lim is None:
             self.y_lim = self._find_y_lim_dynamically(self.y_data_list)
         else:
@@ -152,14 +157,13 @@ class BaseChartGenerator:
     #
     # Chooses which x positions get ticks: an explicit
     # x_ticks list wins; otherwise dates whose YYYY-MM-DD
-    # form ends with ends_with are kept. exclude_ends_with
-    # then removes matches (used to thin crowded month
-    # labels).
-    #
-    # GOTCHA: calling with only exclude_ends_with while
-    # self.x_ticks is still None raises TypeError (the
-    # exclusion loop iterates None). Current callers always
-    # pass ends_with, so it never triggers today.
+    # form ends with ends_with are kept; exclusion alone
+    # filters the full date series. exclude_ends_with thins
+    # crowded month labels BEFORE the first/last data
+    # points are forced back in, so the endpoints always
+    # survive and the axis shows its true extent (the
+    # series-start label used to vanish whenever it matched
+    # an exclusion pattern).
     #
     # Used by:
     #   - generateCoefficientCharts,
@@ -175,6 +179,11 @@ class BaseChartGenerator:
     def set_x_ticks(self, ends_with=None, x_ticks=None, exclude_ends_with=None):
         if x_ticks:
             self.x_ticks = x_ticks
+            if exclude_ends_with:
+                self.x_ticks = [
+                    date for date in self.x_ticks
+                    if not any(date.strftime('%Y-%m-%d').endswith(pattern) for pattern in exclude_ends_with)
+                ]
 
         elif ends_with:
             self.x_ticks = [
@@ -182,20 +191,26 @@ class BaseChartGenerator:
                 if date.strftime('%Y-%m-%d').endswith(ends_with)
             ]
 
-            # First/last data points are forced in so the axis
-            # always shows its true extent
+            if exclude_ends_with:
+                self.x_ticks = [
+                    date for date in self.x_ticks
+                    if not any(date.strftime('%Y-%m-%d').endswith(pattern) for pattern in exclude_ends_with)
+                ]
+
+            # First/last data points are forced in AFTER the
+            # exclusion pass so the axis always shows its true
+            # extent
             if self.x_data[0] not in self.x_ticks:
                 self.x_ticks.insert(0, self.x_data[0])
 
             if self.x_data[-1] not in self.x_ticks:
                 self.x_ticks.append(self.x_data[-1])
 
-
-        # Runs on top of whichever branch above filled x_ticks
-        # (TypeError if neither did — see banner)
-        if exclude_ends_with:
+        elif exclude_ends_with:
+            # exclusion without a prior selection acts on the
+            # full date series
             self.x_ticks = [
-                date for date in self.x_ticks
+                date for date in self.x_data
                 if not any(date.strftime('%Y-%m-%d').endswith(pattern) for pattern in exclude_ends_with)
             ]
 
@@ -266,10 +281,10 @@ class BaseChartGenerator:
     # of the maximum snaps to 0 so the baseline reads
     # naturally.
     #
-    # GOTCHA: an empty/None y_data_list returns
-    # (inf, -inf) — the Lorenz subclass keeps
-    # y_data_list=None and only avoids this because its
-    # flows always pass an explicit y_lim.
+    # Degenerate inputs stay safe: an empty/None
+    # y_data_list falls back to (0, 1), and the zero-floor
+    # snap only applies to positive maxima, so all-negative
+    # series keep ordered limits.
     #
     # Used by:
     #   - customize_axes (above) — when y_lim is omitted
@@ -279,16 +294,21 @@ class BaseChartGenerator:
         overall_y_min = float('inf')
         overall_y_max = float('-inf')
 
-        if y_data_list:
-            for y_data in y_data_list:
-                current_y_min = min(y_data) - (0.02 * (max(y_data) - min(y_data)))
-                current_y_max = max(y_data) + (0.25 * (max(y_data) - min(y_data)))
+        # nothing staged — neutral default instead of (inf, -inf)
+        if not y_data_list:
+            return (0, 1)
 
-                overall_y_min = min(overall_y_min, current_y_min)
-                overall_y_max = max(overall_y_max, current_y_max)
+        for y_data in y_data_list:
+            current_y_min = min(y_data) - (0.02 * (max(y_data) - min(y_data)))
+            current_y_max = max(y_data) + (0.25 * (max(y_data) - min(y_data)))
 
-        # A floor near zero reads better as exactly zero
-        if overall_y_min < 0.2 * overall_y_max:
+            overall_y_min = min(overall_y_min, current_y_min)
+            overall_y_max = max(overall_y_max, current_y_max)
+
+        # A floor near zero reads better as exactly zero — only
+        # when the chart rises above zero, so all-negative
+        # series keep ordered limits
+        if overall_y_max > 0 and overall_y_min < 0.2 * overall_y_max:
             overall_y_min = 0
 
         return (overall_y_min, overall_y_max)
@@ -678,11 +698,9 @@ class LorenzCurveChartGenerator(BaseChartGenerator):
     # (x/100)^4, hatched A/B areas and a "Gini Coefficient"
     # label — no real data involved.
     #
-    # BUG (documented, not fixed): print_header is accepted
-    # but never used — unlike the other generators nothing
-    # calls ax.set_title here, so the 'Lorenz Curve
-    # Example' title staged via customize_axes is never
-    # drawn.
+    # print_header toggles the 'Lorenz Curve Example'
+    # title, print_footer the copyright/timestamp strip —
+    # the same contract as the other generators.
     #
     # Used by:
     #   - generateExampleLorenzCharts (blnstats/__init__.py)
@@ -718,9 +736,9 @@ class LorenzCurveChartGenerator(BaseChartGenerator):
             self.ax.text(85, 25, 'B', ha='center', va='center', fontsize=25, bbox=dict(facecolor='white', alpha=1))
 
 
-            # STEP 4: percent axes; the title staged here is
-            # never drawn (see banner)
-            # ==============================================
+            # STEP 4: percent axes; the staged title is drawn
+            # when print_header is on
+            # ===============================================
             self.customize_axes(
                 x_label='Cumulative Percentage of Population',
                 y_label='Cumulative Percentage of Wealth',
@@ -732,6 +750,8 @@ class LorenzCurveChartGenerator(BaseChartGenerator):
                 grid=False
             )
             self._customize_axes()
+            if self.title and print_header:
+                self.ax.set_title(self.title, fontsize=self.title_fontsize)
             self.ax.legend(loc='upper left', fontsize=15)
 
 

@@ -9,9 +9,9 @@
 #  round-trip satoshi amounts losslessly through the float
 #  BTC representation the blockchain parser uses. The last
 #  class drives the whole generateLorenzCharts workflow
-#  with selectors and the chart renderer stubbed — its
-#  expectedFailure pins the IndexError a zero-vertex
-#  snapshot causes.
+#  with selectors and the chart renderer stubbed —
+#  including the zero-vertex snapshot that used to
+#  IndexError the whole run and is now skipped.
 #
 #  Used by:
 #    - runTests.sh (repo root) — "python3 -m unittest discover"
@@ -217,7 +217,7 @@ class TestSatoshiRoundTrip(unittest.TestCase):
 #
 #   test_workflow_completes      — happy path, archive files
 #   test_empty_snapshot_survives — zero-vertex snapshot
-#                                  (expectedFailure)
+#                                  skipped gracefully
 ############################################################
 
 class TestLorenzChartWorkflow(unittest.TestCase):
@@ -297,14 +297,12 @@ class TestLorenzChartWorkflow(unittest.TestCase):
     # test_empty_snapshot_survives
     ############################################################
     #
-    # Proves (intended contract): a snapshot with ZERO
-    # vertices — a month before the network existed, or a
-    # gap in the cache — must be skipped, not kill the whole
-    # chart run. Currently STEP 5's cumulative_sum[-1] raises
-    # IndexError on the empty list.
+    # Proves: a snapshot with ZERO vertices — a month before
+    # the network existed, or a gap in the cache — is skipped
+    # instead of killing the whole chart run (STEP 5 guards
+    # the empty list before cumulative_sum[-1]).
     ############################################################
 
-    @unittest.expectedFailure
     def test_empty_snapshot_survives(self):
         self.__run_workflow([])
 

@@ -542,12 +542,8 @@ def generateCoefficientsOnSingleChart():
 # with the trapezoidal rule and returns twice the area
 # between it and the equality line.
 #
-# Gotcha: the endpoint fix-up is asymmetric — a missing
-# (0, 0) start is fixed by REBINDING new local lists, but
-# a missing (100, 100) end is APPENDED IN PLACE, mutating
-# the caller's lists. The only caller always passes lists
-# that already end at 100, so the mutation never fires
-# today.
+# Pure function: both endpoint fix-ups rebind fresh local
+# lists, so the caller's lists are never mutated.
 #
 # Used by:
 #   - generateLorenzCharts (below) — only as a printed
@@ -561,8 +557,8 @@ def calculate_gini_from_lorenz(percentiles, cumulative_percentages):
         percentiles = [0] + percentiles
         cumulative_percentages = [0] + cumulative_percentages
     if percentiles[-1] != 100 or cumulative_percentages[-1] != 100:
-        percentiles.append(100)
-        cumulative_percentages.append(100)
+        percentiles = percentiles + [100]
+        cumulative_percentages = cumulative_percentages + [100]
 
     # Percentages → proportions, then the trapezoidal area
     # under the curve.
@@ -689,10 +685,13 @@ def generateLorenzCharts():
 
                     sorted_data = sorted(nodesmetricsData, key=lambda x: x.value)
 
+                    # a snapshot with zero vertices has no curve —
+                    # skip it instead of dying on cumulative_sum[-1]
+                    if not sorted_data:
+                        continue
+
                     cumulative_sum = [sum(item.value for item in sorted_data[:i+1]) for i in range(len(sorted_data))]
 
-                    # A snapshot with zero vertices would IndexError
-                    # here — cumulative_sum[-1] on an empty list.
                     total = cumulative_sum[-1]
                     cumulative_percentages = [x / total * 100 for x in cumulative_sum]
 

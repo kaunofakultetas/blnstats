@@ -6,9 +6,10 @@
 #  printed cross-check for the Lorenz charts) and
 #  GeneralStats.calculate (the published node/channel/
 #  capacity totals, including the halve-the-double-count
-#  and satoshi->BTC conventions). Known bugs are asserted
-#  correct-side-up under @unittest.expectedFailure, as in
-#  test_scientific_coefficients.py. Importing blnstats pulls
+#  and satoshi->BTC conventions). The bugs originally
+#  pinned here (caller-list mutation, endpoint-only guard)
+#  are FIXED — their tests now guard against regression.
+#  Importing blnstats pulls
 #  the whole package (matplotlib included) — fine inside the
 #  backend image, where this suite runs.
 #
@@ -70,8 +71,8 @@ def make_vertices(y_axis, per_height):
 #   test_matches_discrete_gini  — cross-check vs the exact
 #                                 Coefficients formula
 #   test_missing_origin_handled — the (0,0) fix-up path
-#   test_missing_end_does_not_mutate_caller — the in-place
-#                                 append bug (expectedFailure)
+#   test_missing_end_does_not_mutate_caller — both endpoint
+#                                 fix-ups rebind
 ############################################################
 
 class TestGiniFromLorenz(unittest.TestCase):
@@ -163,14 +164,11 @@ class TestGiniFromLorenz(unittest.TestCase):
     ############################################################
     #
     # Proves: a curve arriving without its (100,100) endpoint
-    # must ALSO leave the caller's lists untouched. Currently
-    # that path appends IN PLACE (asymmetric with the origin
-    # fix-up), so a caller reusing its list for plotting would
-    # draw a phantom endpoint. Never fires with today's sole
-    # caller — this pins the contract for the next one.
+    # ALSO leaves the caller's lists untouched — both endpoint
+    # fix-ups rebind fresh local lists, so no caller can ever
+    # find a phantom appended point in its own data.
     ############################################################
 
-    @unittest.expectedFailure
     def test_missing_end_does_not_mutate_caller(self):
         percentiles = [0, 25, 50]
         cumulative = [0, 5, 20]
@@ -194,8 +192,8 @@ class TestGiniFromLorenz(unittest.TestCase):
 #   test_label_guards      — wrong yAxis labels raise
 #   test_length_guard      — mismatched series length raises
 #   test_endpoint_guard    — mismatched first height raises
-#   test_mid_series_mismatch_raises — the guard hole
-#                            (expectedFailure)
+#   test_mid_series_mismatch_raises — the full key-list
+#                            guard
 ############################################################
 
 class TestGeneralStatsCalculate(unittest.TestCase):
@@ -319,14 +317,11 @@ class TestGeneralStatsCalculate(unittest.TestCase):
     ############################################################
     #
     # Proves: a MID-series height mismatch (same length, same
-    # first and last height) must also raise — the capacity of
-    # one block would otherwise be paired with the channel
-    # count of a different one. The current guard compares
-    # only the endpoints, so this slips through and produces a
-    # misaligned published series.
+    # first and last height) also raises — the full key-list
+    # guard stops one block's capacity being paired with a
+    # different block's channel count.
     ############################################################
 
-    @unittest.expectedFailure
     def test_mid_series_mismatch_raises(self):
         capacity = make_vertices('List(NodeID,Capacity)', {
             '500000': ('2018-01-01', 1514764800, [('a', 200000000)]),

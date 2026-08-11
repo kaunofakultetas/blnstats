@@ -368,19 +368,18 @@ class Coefficients:
     #
     # Share of the total held by the top 10% of holders:
     # sort descending, take the first floor(n * 0.1)
-    # entries, divide their sum by the grand total. Despite
-    # the name it returns a FRACTION in [0, 1], not 0-100.
-    #
-    # BUG (documented, not fixed): unlike the other metrics
-    # there is no zero-total guard — an all-zero snapshot
-    # divides 0/0 and returns numpy nan. Also floor(n*0.1)
-    # is 0 for n < 10, yielding 0.0 regardless of actual
-    # concentration.
+    # entries (never fewer than one — for n < 10 the top
+    # decile IS the single largest holder), divide their
+    # sum by the grand total. Despite the name it returns a
+    # FRACTION in [0, 1], not 0-100. Empty or all-zero
+    # input returns 0.0, the same degenerate convention as
+    # every other metric. For n >= 10 the floor cut is
+    # unchanged, so historical series keep their values.
     #
     # Used by:
     #   - calculate_coefficient (below,
     #     "Top10PercentControlPercentage")
-    #   - nothing tests this at the moment
+    #   - tests/test_scientific_coefficients.py
     ############################################################
 
     def calculate_top_10_percent_control_percentage(self, data) -> float:
@@ -388,8 +387,13 @@ class Coefficients:
         if np.any(data < 0):
             raise ValueError("All data values must be non-negative.")
 
+        # degenerate convention shared with the other metrics —
+        # and the guard that used to be missing (0/0 -> nan)
+        if len(data) == 0 or np.sum(data) == 0:
+            return 0.0
+
         sorted_data = np.sort(data)[::-1]
-        ten_percent_index = int(0.1 * len(sorted_data))
+        ten_percent_index = max(1, int(0.1 * len(sorted_data)))
         return np.sum(sorted_data[:ten_percent_index]) / np.sum(sorted_data)
 
 
@@ -402,15 +406,14 @@ class Coefficients:
     ############################################################
     #
     # Raw sum of the values held by the top 10% of holders
-    # — same floor(n * 0.1) cut as the percentage variant,
-    # including its n < 10 -> 0.0 edge. The unit is
-    # whatever the input carries: satoshis for capacity,
-    # channels for degree.
+    # — same never-fewer-than-one decile cut as the
+    # percentage variant. The unit is whatever the input
+    # carries: satoshis for capacity, channels for degree.
     #
     # Used by:
     #   - calculate_coefficient (below,
     #     "Top10PercentControlSum")
-    #   - nothing tests this at the moment
+    #   - tests/test_scientific_coefficients.py
     ############################################################
 
     def calculate_top_10_percent_control_sum(self, data) -> float:
@@ -419,7 +422,8 @@ class Coefficients:
             raise ValueError("All data values must be non-negative.")
 
         sorted_data = np.sort(data)[::-1]
-        ten_percent_index = int(0.1 * len(sorted_data))
+        # empty input: the [:1] slice of an empty array sums to 0.0
+        ten_percent_index = max(1, int(0.1 * len(sorted_data)))
         return np.sum(sorted_data[:ten_percent_index])
 
 

@@ -7,13 +7,14 @@
 #  /DATA/GENERATED/General_Stats/Channel_Lifetime/ path
 #  (created inside the throwaway test container). Regular
 #  tests pin the blocks->days bucketing (144 blocks/day,
-#  floor) and the JSON payloads; the expectedFailure tests
-#  pin three found bugs: the average query's WHERE missing
-#  the histogram's same-block/inverted-row filter, the
-#  method returning a raw SQL Decimal instead of the float
-#  it writes, and GeneralStats.calculate crashing on the
-#  half-integer channel counts that arise when one channel
-#  endpoint is missing from a snapshot.
+#  floor) and the JSON payloads. The float-return contract
+#  and the odd-endpoint-sum invariant (half a channel is
+#  physically impossible — an odd sum means incomplete
+#  data and raises a diagnostic error) are FIXED and now
+#  guard against regression; the one remaining
+#  expectedFailure pins the average query's WHERE missing
+#  the histogram's same-block/inverted-row filter — a
+#  published-population decision still pending review.
 #
 #  Used by:
 #    - runTests.sh (repo root) — "python3 -m unittest discover"
@@ -118,11 +119,13 @@ class TestLifetimePlot(unittest.TestCase):
 # TestLifetimeContracts
 ############################################################
 #
-# The found bugs, asserted correct-side-up.
+# The found contracts, asserted correct-side-up.
 #
-#   test_average_and_histogram_filters_match (expectedFailure)
-#   test_average_returns_float               (expectedFailure)
-#   test_fractional_channel_count_survives   (expectedFailure)
+#   test_average_and_histogram_filters_match (expectedFailure
+#     — pending the published-population decision)
+#   test_average_returns_float               — fixed
+#   test_odd_endpoint_sum_raises             — the whole-
+#     channel invariant, enforced with a clear error
 ############################################################
 
 class TestLifetimeContracts(unittest.TestCase):
@@ -160,14 +163,11 @@ class TestLifetimeContracts(unittest.TestCase):
     # test_average_returns_float
     ############################################################
     #
-    # Proves (intended contract): the method returns the same
-    # float it writes into the JSON. Currently it returns the
-    # raw SQL Decimal (or None on an empty table) while the
-    # file says float — callers comparing the two get a
-    # type surprise.
+    # Proves: the method returns the same float it writes into
+    # the JSON (0 on an empty table) — no raw SQL Decimal or
+    # None type surprises for callers.
     ############################################################
 
-    @unittest.expectedFailure
     def test_average_returns_float(self):
         result = [{'AverageChannelLifetime': Decimal('288.0')}]
         with patch.object(general_stats, 'get_db_connection', lambda: FakeConn(result, [])):
@@ -180,20 +180,17 @@ class TestLifetimeContracts(unittest.TestCase):
 
 
     ############################################################
-    # test_fractional_channel_count_survives
+    # test_odd_endpoint_sum_raises
     ############################################################
     #
-    # Proves (intended contract): a snapshot where one channel
-    # endpoint is missing (its peer absent from the vertex
-    # set) produces a half-integer channel count after the /2
-    # halving — 3/2 = 1.5 here. GeneralStatsData declares
-    # channel_count as int, so pydantic rejects 1.5 and the
-    # whole stats build crashes with a ValidationError instead
-    # of reporting the honest fractional count.
+    # Proves: an ODD channel-endpoint sum — physically
+    # impossible for a complete snapshot, every channel has
+    # two endpoints — is refused with a diagnostic ValueError
+    # naming the block height, instead of publishing half a
+    # channel or dying in an opaque pydantic ValidationError.
     ############################################################
 
-    @unittest.expectedFailure
-    def test_fractional_channel_count_survives(self):
+    def test_odd_endpoint_sum_raises(self):
         meta = {'type': 't', 'description': 'd', 'updated': 'u', 'xAxis': 'x',
                 'yAxisSupplyChain': ['BlockHeight']}
         capacity = VerticesAspectDataStructure(
@@ -205,8 +202,10 @@ class TestLifetimeContracts(unittest.TestCase):
             data={'500000': {'date': '2018-01-01', 'timestamp': 1514764800,
                              'vertices': [{'name': 'a', 'value': 3}]}})
 
-        stats = GeneralStats().calculate(capacity, counts)
-        self.assertEqual(stats.data['500000'].channel_count, 1.5)
+        with self.assertRaises(ValueError) as ctx:
+            GeneralStats().calculate(capacity, counts)
+        self.assertIn('500000', str(ctx.exception))
+        self.assertIn('endpoint', str(ctx.exception))
 
 
 
