@@ -92,7 +92,9 @@ class DBFixture(unittest.TestCase):
             with conn.cursor() as cursor:
                 for table in ('Blockchain_Transactions', '_CACHED1_NodeMetrics',
                               'Lightning_Channels', 'Blockchain_Blocks',
-                              'Lightning_Entities', 'Lightning_NodeAliases'):
+                              'Lightning_Entities', 'Lightning_NodeAliases',
+                              '_LNResearch_ChannelAnnouncements',
+                              '_LND_DBReader_ChannelAnnouncements'):
                     cursor.execute(f'DELETE FROM `{table}`')
             conn.commit()
 
@@ -228,6 +230,8 @@ class TestDateMaskSelector(DBFixture):
 #   test_active_channels_and_double_credit — the funding <=
 #     h < spending window and per-endpoint crediting
 #   test_close_boundary — a channel closing AT h is inactive
+#   test_tombstoned_channel_invisible — SpendingBlockIndex 0
+#     never enters any metric
 #   test_foreign_key_enforced — init.sql relationships live
 ############################################################
 
@@ -307,6 +311,30 @@ class TestActivityWindow(DBFixture):
         at_200 = {row['NodeID']: int(row['NodeValue'])
                   for row in RawDataSelector().get_ln_nodes_capacities(200)}
         self.assertEqual(at_200, {'A': 1000, 'B': 1700, 'C': 700})  # channel 3 counts at its funding height
+
+
+
+
+
+
+    ############################################################
+    # test_tombstoned_channel_invisible
+    ############################################################
+    #
+    # Proves: a tombstoned channel (SpendingBlockIndex = 0 —
+    # funding outpoint proven nonexistent) never enters the
+    # capacity or channel-count metrics at ANY height: the
+    # activity window needs SpendingBlockIndex > h, and 0
+    # beats no height.
+    ############################################################
+
+    def test_tombstoned_channel_invisible(self):
+        self.__seed_network()
+        self.seed_channel(4, 'A', 'B', funding_block=100, spending_block=0, value=99999)
+
+        capacities = {row['NodeID']: int(row['NodeValue'])
+                      for row in RawDataSelector().get_ln_nodes_capacities(120)}
+        self.assertEqual(capacities, {'A': 1500, 'B': 1000, 'C': 500})  # identical to the untombstoned network
 
 
 
@@ -486,6 +514,70 @@ class TestLifetimePopulations(DBFixture):
         self.__seed_lifetimes()
         average = GeneralStats().calculate_channel_lifetime_average()
         self.assertAlmostEqual(float(average), 100.0, places=4)
+
+
+
+
+
+
+
+
+############################################################
+# TestChannelPromotion
+############################################################
+#
+#   test_pre_segwit_announcements_dropped — both importers'
+#     promotion step refuses funding blocks before SegWit
+#     activation (481,824): no real LN channel can predate
+#     it, and the LND DBReader dump shipped bogus block-500
+#     SCIDs (2026-08 production audit)
+############################################################
+
+class TestChannelPromotion(DBFixture):
+
+
+
+
+
+
+    ############################################################
+    # test_pre_segwit_announcements_dropped
+    ############################################################
+    #
+    # Proves: a staged announcement claiming funding block 500
+    # never reaches Lightning_Channels, while a legitimate
+    # post-SegWit one does — through BOTH importers' promotion
+    # queries.
+    ############################################################
+
+    def test_pre_segwit_announcements_dropped(self):
+        from blnstats.data_import.lnd_dbreader import LNDDBReader
+        from blnstats.data_import.ln_research import LNResearchData
+
+        importers = [
+            ('_LND_DBReader_ChannelAnnouncements', object.__new__(LNDDBReader)),
+            ('_LNResearch_ChannelAnnouncements', object.__new__(LNResearchData)),
+        ]
+        for offset, (table, importer) in enumerate(importers):
+            with self.subTest(table=table):
+                bogus_scid = (500 << 40) + offset
+                real_scid = ((600000 + offset) << 40)
+                with get_db_connection() as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(f'''INSERT INTO {table}
+                            (ShortChannelID, BlockIndex, TxIndex, OutputIndex, NodeID1, NodeID2)
+                            VALUES (%s, 500, 0, 0, 'a', 'b'), (%s, %s, 0, 0, 'c', 'd')''',
+                            (bogus_scid, real_scid, 600000 + offset))
+                    conn.commit()
+
+                importer.insert_or_ignore_into_main()
+
+                with get_db_connection() as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute('SELECT ShortChannelID FROM Lightning_Channels')
+                        promoted = {row[0] for row in cursor.fetchall()}
+                self.assertIn(real_scid, promoted)
+                self.assertNotIn(bogus_scid, promoted)
 
 
 

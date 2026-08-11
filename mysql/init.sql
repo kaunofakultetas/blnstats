@@ -97,7 +97,11 @@ CREATE TABLE IF NOT EXISTS `Lightning_Channels` (
 #
 # On-chain anchor per channel: funding output details and
 # the spending (closing) transaction when one exists.
-# SpendingBlockIndex 999999999 = still open. Filled by
+# SpendingBlockIndex conventions: 999999999 = verified and
+# still open; 0 = tombstone, the claimed funding outpoint
+# does not exist on-chain (bogus gossip — empty txids, zero
+# value, permanently skipped by the sync and invisible to
+# every metric). Filled by
 # data_import/blockchain_transactions.py, which only ever
 # processes ShortChannelIDs SELECTed from
 # Lightning_Channels — hence the FK is always satisfiable;

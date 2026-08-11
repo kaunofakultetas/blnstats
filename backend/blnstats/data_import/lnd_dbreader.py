@@ -340,8 +340,12 @@ class LNDDBReader:
     # Promotes the staged channel announcements into the
     # shared Lightning_Channels table. INSERT IGNORE — rows
     # already promoted (e.g. by the LN Research import) stay
-    # untouched. Public, but nothing outside this class calls
-    # it at the moment.
+    # untouched. Announcements claiming a funding block
+    # before SegWit activation (481,824) are dropped: no
+    # real LN channel can predate SegWit, and the 2026-08
+    # production audit found 3,984 bogus block-500 SCIDs in
+    # this dump. Public, but nothing outside this class
+    # calls it at the moment.
     #
     # Used by:
     #   - __init__ (above) — final pipeline step
@@ -351,9 +355,9 @@ class LNDDBReader:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
-                    INSERT IGNORE INTO Lightning_Channels 
+                    INSERT IGNORE INTO Lightning_Channels
                         (ShortChannelID, BlockIndex, TxIndex, OutputIndex, NodeID1, NodeID2)
-                    SELECT 
+                    SELECT
                         ca.ShortChannelID,
                         ca.BlockIndex,
                         ca.TxIndex,
@@ -361,5 +365,6 @@ class LNDDBReader:
                         ca.NodeID1,
                         ca.NodeID2
                     FROM _LND_DBReader_ChannelAnnouncements ca
+                    WHERE ca.BlockIndex >= 481824
                 ''')
                 conn.commit()

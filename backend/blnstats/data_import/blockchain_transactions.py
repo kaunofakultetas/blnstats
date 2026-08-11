@@ -54,6 +54,14 @@ logger = logging.getLogger(__name__)
 # parsing helpers — flip on only when debugging the parser.
 DEBUG_ENABLED = False
 
+# Sentinel returned by __get_transaction_details when the
+# Electrum server DEFINITIVELY answers "no transaction at
+# that position" (a structured RPC error, not a network
+# failure). The worker then tombstones the channel as bogus
+# gossip instead of retrying forever — see
+# retrieveAndWriteLightningBlockchainTxData.
+TXID_NOT_FOUND = object()
+
 
 
 
@@ -273,9 +281,14 @@ class BlockchainTransactions:
     # answers a single request with a single LF-terminated
     # line. Returns the 'result' payload, or None on any
     # network/protocol error (errors are logged, never
-    # raised). NOTE: the socket is only closed on the happy
-    # path — an exception mid-request leaks the descriptor
-    # until the GC collects it.
+    # raised). rpc_error_marker separates the two failure
+    # kinds: when set, a STRUCTURED JSON-RPC error (the
+    # server answered, deliberately) returns the marker,
+    # while network failures keep returning None — callers
+    # can then tell "does not exist" from "could not ask".
+    # NOTE: the socket is only closed on the happy path — an
+    # exception mid-request leaks the descriptor until the GC
+    # collects it.
     #
     # Used by:
     #   - __get_transaction_details (below)
@@ -283,7 +296,7 @@ class BlockchainTransactions:
     #   - retrieveAndWriteLightningBlockchainTxData (below)
     ############################################################
 
-    def __send_electrum_request(self, server_ip: str, server_port: int, method: str, params: list):
+    def __send_electrum_request(self, server_ip: str, server_port: int, method: str, params: list, rpc_error_marker=None):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(10)
@@ -319,7 +332,7 @@ class BlockchainTransactions:
                     logger.error(f"Error from Electrum server for method {method}: {error_info['message']}")
                 else:
                     logger.error(f"Error from Electrum server for method {method}: {error_info}")
-                return None
+                return rpc_error_marker
 
             return response_json.get('result') if isinstance(response_json, dict) else response_json
             
@@ -508,8 +521,10 @@ class BlockchainTransactions:
     # Two Electrum round-trips: transaction.id_from_pos for
     # the txid, then transaction.get for the raw hex, decoded
     # locally by __parse_raw_transaction. Returns (None, None)
-    # on any failure so the caller treats the outpoint as
-    # retryable.
+    # on any transient failure so the caller retries; returns
+    # (TXID_NOT_FOUND, None) when the server structurally
+    # answers that no transaction exists at that position —
+    # the caller's cue to tombstone instead of retry.
     #
     # Used by:
     #   - retrieveAndWriteLightningBlockchainTxData (below)
@@ -517,9 +532,14 @@ class BlockchainTransactions:
 
     def __get_transaction_details(self, block_height: int, tx_index: int, output_index: int):
         try:
-            # STEP 1: resolve (height, position) to a txid
-            # ============================================
-            tx_id_raw = self.__send_electrum_request(self.electrum_host, self.electrum_port, "blockchain.transaction.id_from_pos", [block_height, tx_index])
+            # STEP 1: resolve (height, position) to a txid — a
+            # structured RPC error means "nothing at that
+            # position", surfaced as TXID_NOT_FOUND
+            # ================================================
+            tx_id_raw = self.__send_electrum_request(self.electrum_host, self.electrum_port, "blockchain.transaction.id_from_pos", [block_height, tx_index], rpc_error_marker=TXID_NOT_FOUND)
+
+            if tx_id_raw is TXID_NOT_FOUND:
+                return TXID_NOT_FOUND, None
 
             if not tx_id_raw:
                 return None, None
@@ -734,9 +754,13 @@ class BlockchainTransactions:
     # so pool.map yields a uniform result set and run() can
     # retry just the failures.
     #
-    # SpendingBlockIndex sentinel: unspent outputs are stored
-    # as 999999999 (passed as a STRING — MySQL coerces it
-    # into the BIGINT column).
+    # SpendingBlockIndex conventions: 999999999 = funding
+    # verified, not spent yet (passed as a STRING — MySQL
+    # coerces it); 0 = TOMBSTONE, the funding outpoint
+    # provably does not exist on-chain (bogus gossip) —
+    # metric-invisible because 0 > h never holds, and
+    # excluded from every future recheck because 0 differs
+    # from the open-channel sentinel.
     #
     # A spend still in the mempool (Electrum height 0 or -1)
     # is not a confirmation — the row is written as unspent
@@ -763,6 +787,40 @@ class BlockchainTransactions:
                     # decode the funding output
                     # ===========================================
                     tx_id, output_details = self.__get_transaction_details(blockIndex, txIndex, outputIndex)
+
+
+                    # STEP 1.1: the server structurally answered
+                    # "no transaction at that position" — bogus
+                    # gossip that slipped past the SegWit floor.
+                    # Tombstone it (SpendingBlockIndex = 0, empty
+                    # ids, zero value): metric-invisible, excluded
+                    # from every future recheck, and the sync
+                    # moves on instead of failing the whole run.
+                    # The young-channel guard treats a claim
+                    # within 6 blocks of the server tip as
+                    # retryable instead — the index may simply lag
+                    # a freshly confirmed channel.
+                    # ============================================
+                    if tx_id is TXID_NOT_FOUND:
+                        tip = self.__send_electrum_request(self.electrum_host, self.electrum_port, "blockchain.headers.subscribe", [])
+                        if not tip or blockIndex > tip['height'] - 6:
+                            error_msg = f"Outpoint {blockIndex}:{txIndex}:{outputIndex} not found but near/past server tip — retrying later"
+                            logger.warning(error_msg)
+                            return (transaction_info, False, error_msg)
+
+                        logger.warning(f"Channel {shortChannelID}: funding outpoint {blockIndex}:{txIndex}:{outputIndex} "
+                                       f"does not exist on-chain — tombstoned as bogus gossip")
+                        db_cursor.execute('''
+                            INSERT INTO Blockchain_Transactions (
+                                ShortChannelID, FundingBlockIndex, FundingTxIndex, FundingOutputIndex,
+                                FundingTxID, FundingScriptHash, Value, SpendingBlockIndex, SpendingTxID, UpdatedDate
+                            ) VALUES (%s, %s, %s, %s, '', '', 0, 0, '', CURDATE())
+                            ON DUPLICATE KEY UPDATE
+                                SpendingBlockIndex = 0, UpdatedDate = CURDATE()
+                        ''', [shortChannelID, blockIndex, txIndex, outputIndex])
+                        db_conn.commit()
+                        return (transaction_info, True, None)
+
                     if not output_details:
                         error_msg = f"Could not retrieve transaction details for {blockIndex}:{txIndex}:{outputIndex}"
                         logger.error(error_msg)

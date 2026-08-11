@@ -489,8 +489,12 @@ class LNResearchData:
     # Promotes the staged channel announcements into the
     # shared Lightning_Channels table. INSERT IGNORE — rows
     # already promoted (e.g. by the LND DBReader import) stay
-    # untouched. Public, but nothing outside this class calls
-    # it at the moment.
+    # untouched. Announcements claiming a funding block
+    # before SegWit activation (481,824) are dropped — no
+    # real LN channel can predate SegWit (the LND DBReader
+    # dump shipped bogus block-500 SCIDs; this dataset was
+    # clean, the filter is symmetry and insurance). Public,
+    # but nothing outside this class calls it at the moment.
     #
     # Used by:
     #   - __init__ (above) — final pipeline step
@@ -500,9 +504,9 @@ class LNResearchData:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute('''
-                    INSERT IGNORE INTO Lightning_Channels 
+                    INSERT IGNORE INTO Lightning_Channels
                         (ShortChannelID, BlockIndex, TxIndex, OutputIndex, NodeID1, NodeID2)
-                    SELECT 
+                    SELECT
                         ca.ShortChannelID,
                         ca.BlockIndex,
                         ca.TxIndex,
@@ -510,6 +514,7 @@ class LNResearchData:
                         ca.NodeID1,
                         ca.NodeID2
                     FROM _LNResearch_ChannelAnnouncements ca
+                    WHERE ca.BlockIndex >= 481824
                 ''')
                 conn.commit()
 

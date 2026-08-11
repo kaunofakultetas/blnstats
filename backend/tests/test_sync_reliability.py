@@ -131,6 +131,9 @@ class TestBlockSyncReliability(unittest.TestCase):
 #                                           hole stays closed
 #   test_mempool_spend_recorded_as_unspent
 #   test_confirmed_spend_recorded
+#   test_nonexistent_outpoint_tombstoned  — bogus gossip is
+#     quarantined gracefully, not fatal
+#   test_young_channel_not_tombstoned     — tip-lag guard
 ############################################################
 
 class TestTransactionSyncReliability(unittest.TestCase):
@@ -271,6 +274,81 @@ class TestTransactionSyncReliability(unittest.TestCase):
         self.assertEqual(params[7], 800000)
         self.assertEqual(params[8], 'aa' * 32)
         self.assertEqual(params[6], 50000000)  # 0.5 BTC in satoshis
+
+
+
+
+
+
+    ############################################################
+    # __run_worker_not_found
+    ############################################################
+    #
+    # Worker harness for the TXID_NOT_FOUND path: the funding
+    # lookup answers "no such transaction", the Electrum tip
+    # is stubbed to tip_height. Returns (result, executed).
+    #
+    # Used by:
+    #   - the two tombstone tests (below)
+    ############################################################
+
+    def __run_worker_not_found(self, tip_height):
+        executed = []
+        txs = object.__new__(bt.BlockchainTransactions)
+        txs.electrum_host, txs.electrum_port = 'stub', 1
+        txs._BlockchainTransactions__get_transaction_details = lambda b, t, o: (bt.TXID_NOT_FOUND, None)
+        txs._BlockchainTransactions__send_electrum_request = lambda *a, **k: {'height': tip_height}
+
+        with patch.object(bt, 'get_db_connection', lambda: FakeConn([None], executed)):
+            result = txs.retrieveAndWriteLightningBlockchainTxData([1000, 5, 0, 7777])
+        return result, executed
+
+
+
+
+
+
+    ############################################################
+    # test_nonexistent_outpoint_tombstoned
+    ############################################################
+    #
+    # Proves: a funding position the server DEFINITIVELY says
+    # does not exist (bogus gossip past the SegWit floor) is
+    # tombstoned — SpendingBlockIndex 0, empty ids, zero
+    # value — and reported as SUCCESS, so the sync moves on
+    # instead of failing the whole run and never retries this
+    # outpoint again.
+    ############################################################
+
+    def test_nonexistent_outpoint_tombstoned(self):
+        (info, ok, err), executed = self.__run_worker_not_found(tip_height=900000)
+        self.assertTrue(ok, err)
+        self.assertEqual(len(executed), 1)
+        sql, params = executed[0]
+        self.assertIn('INSERT INTO Blockchain_Transactions', sql)
+        self.assertIn('SpendingBlockIndex = 0', sql)
+        self.assertEqual(params, [7777, 1000, 5, 0])
+
+
+
+
+
+
+    ############################################################
+    # test_young_channel_not_tombstoned
+    ############################################################
+    #
+    # Proves: when the claimed funding block sits within 6
+    # blocks of the server tip, "not found" may just be index
+    # lag on a freshly confirmed channel — the worker answers
+    # retryable failure and writes NOTHING, so a real young
+    # channel can never be permanently quarantined by lag.
+    ############################################################
+
+    def test_young_channel_not_tombstoned(self):
+        (info, ok, err), executed = self.__run_worker_not_found(tip_height=1003)
+        self.assertFalse(ok)
+        self.assertEqual(executed, [])
 
 
 
