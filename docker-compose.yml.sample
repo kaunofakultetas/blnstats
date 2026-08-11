@@ -1,3 +1,7 @@
+# ------------------------------------------------------------
+#              Common environment variables
+# ------------------------------------------------------------
+
 # Backend and Prefect Worker uses same codebase, so 
 # they need to share the same environment variables
 x-common-envs: &common-envs
@@ -15,11 +19,25 @@ x-common-envs: &common-envs
     - BLNSTATS_ELECTRUM_PORT=50001
     ###############################
 
+    # - APP_DEBUG=true                               # Dev
+
+# ------------------------------------------------------------
+# ------------------------------------------------------------
+# ------------------------------------------------------------
+
+
+
+
+
+
+
 
 
 services:
 
-  # Unified HTTP endpoint for all services
+  # ------------------------------------------------------------
+  #              Incoming/outgoing traffic endpoints
+  # ------------------------------------------------------------
   blnstats-endpoint:
     container_name: blnstats-endpoint
     image: caddy:2-alpine
@@ -27,34 +45,65 @@ services:
     read_only: true
     volumes:
       - ./endpoint/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./DATA:/srv:ro
+      - ./_DATA/_PUBLIC_FILES:/srv:ro
     ports:
       - "80:80"
     restart: unless-stopped
+  # ------------------------------------------------------------
+  # ------------------------------------------------------------
+  # ------------------------------------------------------------
 
 
 
-  # Frontend (From Docker Hub)
-  blnstats-nextjs:
-    container_name: blnstats-nextjs
-    image: vuknf/blnstats-nextjs:latest
+
+
+
+  # ------------------------------------------------------------
+  #                    BLN Stats system services
+  # ------------------------------------------------------------
+  blnstats-vite:
+    container_name: blnstats-vite
+
+    # Docker Hub
+    image: vuknf/blnstats-vite:latest
+
+    # # Self-built
+    # image: blnstats-vite
+    # build:
+    #   context: ./vite
+    #   # dockerfile: Dockerfile                                                         # Prod
+    #   dockerfile: Dockerfile.dev                                                     # Dev
+
+    user: 1000:1000
     read_only: true
-    environment:
-      - API_INTERNAL=http://blnstats-backend:8000
+    # tmpfs:                                                                           # Dev
+    #   - /home/node/.npm:uid=1000,gid=1000                                            # Dev
+    # volumes:                                                                         # Dev
+    #   - ./vite/app:/app                                                              # Dev
     restart: unless-stopped
 
 
 
-  # Backend (From Docker Hub)
   blnstats-backend:
     container_name: blnstats-backend
+
+    # Docker Hub
     image: vuknf/blnstats-backend:latest
-    read_only: false
+    
+    # # Self-built
+    # image: blnstats-backend
+    # build: ./backend
+    
+    user: 1000:1000
+    read_only: true
     tmpfs:
       - /.config/matplotlib:uid=1000,gid=1000
     volumes:
-      # - /etc/localtime:/etc/localtime:ro                          # OPTIONAL: Use local time
-      - ./DATA:/DATA
+      # Data
+      - ./_DATA/_PUBLIC_FILES:/DATA
+
+      # Source code
+      # - ./backend:/app                                                               # Dev
     <<: *common-envs
     restart: unless-stopped
 
@@ -64,29 +113,48 @@ services:
   blnstats-mysql:
     container_name: blnstats-mysql
     image: mysql:9.0.0
+    user: 1000:1000
     read_only: true
     tmpfs:
       - /run/mysqld:uid=999,gid=999
       - /tmp
     volumes:
-      # - /etc/localtime:/etc/localtime:ro      # OPTIONAL: Use local time
+      # Configuration
+      - /etc/localtime:/etc/localtime:ro
       - ./mysql/my.cnf:/etc/mysql/conf.d/my.cnf:ro
-      - ./mysql/data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+      # MySQL data
+      - ./_DATA/mysql/data:/var/lib/mysql
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: lnstats
       MYSQL_USER: lnstats
       MYSQL_PASSWORD: lnstats
     restart: unless-stopped
+  # ------------------------------------------------------------
+  # ------------------------------------------------------------
+  # ------------------------------------------------------------
 
 
 
-  ############## PREFECT #############
+
+
+
+
+  # ------------------------------------------------------------
+  #              BLN Stats system prefect subsystem
+  # ------------------------------------------------------------
   blnstats-prefect-server:
     container_name: blnstats-prefect-server
-    image: blnstats-prefect-server
-    build:
-      context: ./prefect
+
+    # Docker Hub
+    image: vuknf/blnstats-prefect-server:latest
+
+    # # Self-built
+    # image: blnstats-prefect-server
+    # build: ./prefect
+
     read_only: false
     tmpfs:
       - /prefect-data:uid=1000,gid=1000
@@ -96,27 +164,46 @@ services:
 
   blnstats-prefect-worker:
     container_name: blnstats-prefect-worker
-    image: blnstats-prefect-worker
-    build: ./backend
+
+    # Docker Hub
+    image: vuknf/blnstats-backend:latest
+
+    # # Self-built
+    # image: blnstats-backend
+    # build: ./backend
+
+    user: 1000:1000
     read_only: false
     command: ["python3", "-u", "workflows.py"]
     tmpfs:
       - /.prefect:uid=1000,gid=1000
       - /.config/matplotlib:uid=1000,gid=1000
     volumes:
-      - ./backend:/app
-      - ./DATA:/DATA
+      # - ./backend:/app                                                               # Dev
+      - ./_DATA/_PUBLIC_FILES:/DATA
     <<: *common-envs
     restart: unless-stopped
-    ####################################
+  # ------------------------------------------------------------
+  # ------------------------------------------------------------
+  # ------------------------------------------------------------
 
 
 
-  # Database browser
+
+
+
+
+
+
+
+  # ------------------------------------------------------------
+  #              Additional administration services 
+  # ------------------------------------------------------------
   blnstats-dbgate:
     container_name: blnstats-dbgate
-    image: dbgate/dbgate:7.1.12-alpine
-    read_only: false
+    image: dbgate/dbgate:7.2.3-alpine
+    user: root
+    read_only: true
     environment:
       WEB_ROOT: /dbgate
 
@@ -131,16 +218,20 @@ services:
 
 
 
-  # File browser for administrators
+  # Filebrowser for administrators
   blnstats-filebrowser:
     container_name: blnstats-filebrowser
     image: vuknf/filebrowser-noauth:latest
+    user: 1000:1000
     read_only: false
     volumes:
-      - ./DATA:/data
-    environment:
-      - PUID=1000
-      - PGID=1000
+      - ./_DATA/_PUBLIC_FILES:/data
     restart: unless-stopped
+  # ------------------------------------------------------------
+  # ------------------------------------------------------------
+  # ------------------------------------------------------------
+
+
+
 
 

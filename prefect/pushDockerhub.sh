@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-CONTAINER_NAME=blnstats-vite
+CONTAINER_NAME=blnstats-prefect-server
 
 TODAY=$(date +%Y%m%d)
 sudo docker login -u admin@knf.vu.lt
