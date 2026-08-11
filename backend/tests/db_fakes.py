@@ -35,6 +35,10 @@ class FakeCursor:
         self.executed.append((sql, params))
         self.result = self.script.pop(0) if self.script else []
 
+    def executemany(self, sql, rows):
+        self.executed.append((sql, list(rows)))
+        self.result = self.script.pop(0) if self.script else []
+
     def fetchone(self):
         return self.result
 
