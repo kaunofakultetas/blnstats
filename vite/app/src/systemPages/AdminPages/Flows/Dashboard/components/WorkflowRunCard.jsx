@@ -56,6 +56,7 @@ const getStatusColor = (status) => {
     case 'pending': return 'default';
     case 'failed': return 'error';
     case 'stopped': return 'warning';
+    case 'cancelling': return 'warning';
     default: return 'default';
   }
 };
@@ -67,6 +68,7 @@ const getStatusEmoji = (status) => {
     case 'pending': return '⏳';
     case 'failed': return '❌';
     case 'stopped': return '⏹️';
+    case 'cancelling': return '🛑';
     default: return '⏳';
   }
 };
@@ -79,6 +81,13 @@ const getStatusEmoji = (status) => {
 
 // -----------------------------------------------------------
 // TaskItem
+// -----------------------------------------------------------
+//
+// One task row: status emoji, name, and the duration chip
+// when the task has one.
+//
+// Used by:
+//   - SubflowItem, WorkflowRunCard (below)
 // -----------------------------------------------------------
 
 function TaskItem({ item }) {
@@ -149,6 +158,14 @@ function SubflowItem({ item }) {
 
 // -----------------------------------------------------------
 // WorkflowRunCard (default export)
+// -----------------------------------------------------------
+//
+// The card: emoji + run name + status chip and the start time
+// in the header, "View in Prefect" beside them, then the
+// task/subflow list when the run has items.
+//
+// Used by:
+//   - ActiveWorkflows — one card per run
 // -----------------------------------------------------------
 
 export default function WorkflowRunCard({ run }) {

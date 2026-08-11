@@ -24,6 +24,23 @@ import Providers from '@/providers';
 import { AuthProvider } from '@/AuthGuard';
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// App (default export)
+// -----------------------------------------------------------
+//
+// Chooses between the bare /login outlet and the fully
+// wrapped tree — theme, auth context and emotion-first style
+// injection; the page frames live in the layout routes below.
+//
+// Used by:
+//   - router.jsx — element of the "/" layout route
+// -----------------------------------------------------------
+
 export default function App() {
 
   const { pathname } = useLocation();

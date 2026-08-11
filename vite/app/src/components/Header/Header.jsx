@@ -10,6 +10,12 @@
 //  prop, so the bar reads the same state as every other
 //  consumer and no layout has to thread it down.
 //
+//  Split into (root component last):
+//
+//    NavbarButton — one nav link (internal <Link>, or an
+//                   external <a> in a new tab)
+//    Header       — the bar itself (default export)
+//
 //  Used by:
 //    - PublicPageLayout, AdminPageLayout — mounted once above
 //      the routed page
@@ -84,6 +90,15 @@ function NavbarButton({ href, text, pathname, external = false, show = true, onC
 
 // -----------------------------------------------------------
 // Header (default export)
+// -----------------------------------------------------------
+//
+// Renders both nav layouts — the wide-screen rows and the
+// hamburger Menu repeat the same NavbarButton list — and
+// holds the Login/Logout button back until `ready`.
+//
+// Used by:
+//   - PublicPageLayout, AdminPageLayout — mounted once above
+//     the routed page
 // -----------------------------------------------------------
 
 export default function Header() {

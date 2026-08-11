@@ -7,8 +7,10 @@
 //
 //  The SVG is wiped and redrawn on every size or data change —
 //  a ResizeObserver reports the wrapper width and every radius,
-//  offset and font size derives from it. Missing data is not an
-//  error: counts fall back to 0 and the diagram renders empty.
+//  offset and font size derives from it. The circles are equal
+//  and fixed — schematic, not proportional to the counts; only
+//  the printed numbers change. Missing data is not an error:
+//  counts fall back to 0 and the diagram renders empty.
 //
 //  Used by:
 //    - DataSources — above the time series
@@ -21,12 +23,31 @@ import * as d3 from 'd3';
 // Shown until the first ResizeObserver callback arrives
 const INITIAL_DIMENSIONS = { width: 800, height: 500 };
 
+// The odd key names are literal: the backend emits its SQL
+// staging-table names as the JSON keys (compare_sources.py)
 const DEFAULT_DATA = {
   "_LNResearch_ChannelAnnouncements": 0,
   "_LND_DBReader_ChannelAnnouncements": 0,
   "overlap": 0
 };
 
+
+
+
+
+
+
+// -----------------------------------------------------------
+// VennDiagramChart (default export)
+// -----------------------------------------------------------
+//
+// Owns the refs and size state the two effects work on and
+// renders the <svg> with the three totals cards below it; the
+// "Updated" stamp shows only when the data carries one.
+//
+// Used by:
+//   - DataSources — above the time series
+// -----------------------------------------------------------
 
 export default function VennDiagramChart({ data }) {
 
@@ -214,7 +235,9 @@ export default function VennDiagramChart({ data }) {
         </div>
       </div>
 
-      {/* Only shown when the generated file carries the field */}
+      {/* The backend always stamps updated_at into the file
+          (compare_sources.py) — this guard only matters for the
+          DEFAULT_DATA fallback, which has no such field */}
       {chartData["updated_at"] && (
         <div className="mt-6 text-center text-base text-gray-600">
           <div className="text-sm text-gray-500">Updated: {chartData["updated_at"]}</div>

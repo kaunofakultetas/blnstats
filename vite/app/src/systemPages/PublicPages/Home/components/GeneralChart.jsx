@@ -6,8 +6,10 @@
 //  data.meta.type: GeneralStatsDataStructure (the default),
 //  one entry per block height plotted against time, and
 //  ChannelLifetimePlot, one entry per channel age in days.
-//  Nothing passes the lifetime shape today; those branches
-//  stay because wiring one up is a one-line caller change.
+//  The lifetime branches are dead today: the backend writes
+//  that JSON (General_Stats/Channel_Lifetime/) but no page
+//  fetches it, so nothing passes the shape here. They stay
+//  because wiring one up is a one-line caller change.
 //
 //  Colors come from the MUI theme, not Tailwind: recharts
 //  writes them into SVG attributes, where a CSS variable would
@@ -19,9 +21,6 @@
 //    CustomTooltip                   — the dark hover card
 //    formatYAxisTick                 — 1000 → "1k"
 //    GeneralChart                    — the chart (default export)
-//
-//  Used by:
-//    - Home — capacity, node count and channel count over time
 // -----------------------------------------------------------
 
 import { useId, useMemo } from 'react';
@@ -40,6 +39,8 @@ import { useTheme } from '@mui/material/styles';
 import PageLoading from '@/components/PageLoading/PageLoading';
 
 
+// Unit-suffixed values for the tooltip card only — the axes
+// keep bare numbers via formatYAxisTick below
 const formatBitcoin = (value) => `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} BTC`;
 const formatNodeCount = (value) => `${value.toLocaleString()} nodes`;
 
@@ -131,6 +132,19 @@ const formatYAxisTick = (value) => {
 
 
 
+
+// -----------------------------------------------------------
+// GeneralChart (default export)
+// -----------------------------------------------------------
+//
+// Normalizes data.data into time-ordered recharts entries
+// (memoized), shows the loading filler until they exist, then
+// draws the gradient area with brush and custom tooltip.
+//
+// Used by:
+//   - Home — three instances: capacity, node count and
+//     channel count over time
+// -----------------------------------------------------------
 
 export default function GeneralChart({ data, height = 400, title, dataKey, yAxisLabel }) {
 

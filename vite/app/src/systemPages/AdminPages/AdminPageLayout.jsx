@@ -40,6 +40,13 @@ import AdminSidebar from "@/components/Admin/Sidebar/Sidebar";
 // -----------------------------------------------------------
 // Footer
 // -----------------------------------------------------------
+//
+// The burgundy copyright bar closing the frame — 30px of
+// static text, no props.
+//
+// Used by:
+//   - AdminSkeleton, AdminPageLayout (below)
+// -----------------------------------------------------------
 
 function Footer() {
   return (
@@ -61,6 +68,9 @@ function Footer() {
 //
 // The heights match the real frame, so the page does not jump
 // when /api/checkauth answers.
+//
+// Used by:
+//   - AdminPageLayout (below) — while the session check runs
 // -----------------------------------------------------------
 
 function AdminSkeleton() {
@@ -95,6 +105,18 @@ function AdminSkeleton() {
 
 
 
+
+// -----------------------------------------------------------
+// AdminPageLayout (default export)
+// -----------------------------------------------------------
+//
+// Skeleton while the session check runs, a redirect to /login
+// (carrying redirectTo) when signed out, otherwise the frame:
+// Toaster + Header, sidebar beside the routed page, Footer.
+//
+// Used by:
+//   - router.jsx — layout route around every admin page
+// -----------------------------------------------------------
 
 export default function AdminPageLayout() {
 

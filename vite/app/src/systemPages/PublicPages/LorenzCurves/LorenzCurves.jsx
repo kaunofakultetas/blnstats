@@ -21,6 +21,23 @@ const curveUrl = (subject, metric) =>
   `/rawdata/GENERATED/${subject}/${metric}/Lorenz_Curves/20XX-03-01/10x6_Full.svg?inline=true`;
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// CURVE_SECTIONS
+// -----------------------------------------------------------
+//
+// The two metric groups of the page, in display order — each
+// becomes a heading, its description, and the Nodes +
+// Entities curve pair.
+//
+// Used by:
+//   - LorenzCurves (below)
+// -----------------------------------------------------------
+
 const CURVE_SECTIONS = [
   {
     metric: "degree",
@@ -34,6 +51,23 @@ const CURVE_SECTIONS = [
   },
 ];
 
+
+
+
+
+
+
+// -----------------------------------------------------------
+// LorenzCurves (default export)
+// -----------------------------------------------------------
+//
+// Maps CURVE_SECTIONS to divider-separated sections of two
+// GeneratedImages each — Nodes first, then Entities, both
+// from the same yearly March snapshot mask.
+//
+// Used by:
+//   - router.jsx — route /lorenz
+// -----------------------------------------------------------
 
 export default function LorenzCurves() {
   return (

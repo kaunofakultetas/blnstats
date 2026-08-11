@@ -12,6 +12,22 @@ import { Box, Grid, Typography } from '@mui/material';
 import WorkflowTemplateCard from './WorkflowTemplateCard';
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// WorkflowTemplates (default export)
+// -----------------------------------------------------------
+//
+// A responsive card grid — one WorkflowTemplateCard per
+// deployment, the trigger handler passed straight through.
+//
+// Used by:
+//   - FlowsDashboard — the second tab
+// -----------------------------------------------------------
+
 export default function WorkflowTemplates({ workflowTemplates, triggerWorkflow }) {
   return (
     <Box>

@@ -48,6 +48,24 @@ function safeRedirectTarget(redirectTo) {
 }
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// Login (default export)
+// -----------------------------------------------------------
+//
+// The white card over the particles background: email and
+// password fields (Enter submits too), the backend's error
+// text shown verbatim, and a grey loader button while the
+// login request runs.
+//
+// Used by:
+//   - router.jsx — route /login (rendered without a frame)
+// -----------------------------------------------------------
+
 export default function Login() {
 
   const [loggingIn, setLoggingIn] = useState(false);
@@ -93,7 +111,7 @@ export default function Login() {
         <img src='/knf-color.png' alt='' width={250} height={83} className="rounded-2xl" />
 
         <Box className="text-center mt-2">
-          <Typography component="h1" level="inherit" fontSize="1.25em" mb="0.25em">
+          <Typography component="h1" fontSize="1.25em" mb="0.25em">
             <b>Bitcoin LN Statistics</b>
           </Typography>
         </Box>
@@ -126,10 +144,8 @@ export default function Login() {
       </Box>
 
 
-
       {/* Particles */}
       <Box className="fixed h-screen"><Particles /></Box>
-
 
 
       {/* Footer */}

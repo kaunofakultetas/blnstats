@@ -20,9 +20,31 @@ import PageLoading from "@/components/PageLoading/PageLoading";
 import VennDiagramChart from './components/VennDiagramChart';
 
 
+// Both written by the compare-sources import (backend
+// blnstats/data_import/compare_sources.py). "20XX-03-01" is a
+// literal directory name — "20XX" plus the March x-tick mask —
+// not a date to substitute.
 const COMPARE_SOURCES_URL = '/rawdata/GENERATED/Compare_Sources/Channel_Announcements/compare_sources.json';
 const TIME_SERIES_URL = '/rawdata/GENERATED/Compare_Sources/Channel_Announcements/20XX-03-01/10x6_Full.svg';
 
+
+
+
+
+
+
+// -----------------------------------------------------------
+// DataSources (default export)
+// -----------------------------------------------------------
+//
+// Fetches the overlap counts for the Venn diagram — a spinner
+// while pending, a red notice on failure — and shows the
+// pre-rendered time-series SVG below it.
+//
+// Used by:
+//   - router.jsx — route /datasources (inside
+//     PublicPageLayout, full width)
+// -----------------------------------------------------------
 
 export default function DataSources() {
 

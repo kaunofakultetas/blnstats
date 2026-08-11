@@ -26,6 +26,23 @@ import ColumnsButton from '@/components/DatagridCustomComponents/ColumnsButton';
 import ToolbarButton from '@/components/DatagridCustomComponents/ToolbarButton';
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// QuickSearchToolbar (default export)
+// -----------------------------------------------------------
+//
+// The toolbar row itself: the always-expanded quick filter
+// first, then the columns button, the add-new button only
+// when onAddNew is given, then the caller's children.
+//
+// Used by:
+//   - AdministratorsListTable — the toolbar slot
+// -----------------------------------------------------------
+
 export default function QuickSearchToolbar({ placeholder = "Search...", columnsLabel, addNewLabel = "Add new", onAddNew, children }) {
   return (
     <Box sx={{ margin: 1, display: 'flex', flexDirection: 'row', alignItems: 'center' }}>

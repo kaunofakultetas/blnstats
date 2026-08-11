@@ -7,7 +7,10 @@
 //  served from /rawdata.
 //
 //  The dates are baked into the file paths and into the
-//  headings — a new snapshot means editing both.
+//  headings — a new snapshot means editing both. Unlike the
+//  other chart pages, NO pipeline in backend/blnstats/
+//  __init__.py writes /DATA/GENERATED/Snapshots — the two
+//  SVGs are placed there by hand.
 //
 //  Used by:
 //    - router.jsx — route /snapshots (inside PublicPageLayout,
@@ -26,6 +29,23 @@ const IMAGE_STYLE = {
   backgroundColor: 'white',
 };
 
+
+
+
+
+
+
+// -----------------------------------------------------------
+// Snapshots (default export)
+// -----------------------------------------------------------
+//
+// Two hand-maintained sections — heading, blurb, framed
+// GeneratedImage — with the snapshot dates repeated in both
+// the heading text and the file path.
+//
+// Used by:
+//   - router.jsx — route /snapshots
+// -----------------------------------------------------------
 
 export default function Snapshots() {
   return (
@@ -53,6 +73,8 @@ export default function Snapshots() {
         The share of network capacity held by each entity, visualized at a specific moment in time.
       </p>
 
+      {/* "Bubles" is the filename on disk — the typo is
+          load-bearing, correcting it here breaks the image */}
       <GeneratedImage
         src={"/rawdata/GENERATED/Snapshots/2025-03-01-Bubles.svg"}
         alt="Entities sizes"

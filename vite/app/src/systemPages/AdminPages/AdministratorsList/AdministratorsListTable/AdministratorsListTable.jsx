@@ -6,9 +6,11 @@
 //  TanStack query that is invalidated on every save, delete
 //  and dialog close. A 401 bounces to /login.
 //
-//  MySQL's JSON_ARRAYAGG answers NULL — not [] — while no
-//  account exists, hence `data ?? []`. DataGrid v8 renders
-//  the toolbar slot only when `showToolbar` is set.
+//  On an empty table the backend 500s instead of answering []
+//  (JSON_ARRAYAGG yields NULL and json.loads(None) raises —
+//  see the route banner), so `data ?? []` covers the pending
+//  and error states, not a null body. DataGrid v8 renders the
+//  toolbar slot only when `showToolbar` is set.
 //
 //  Split into (root component last):
 //
@@ -31,6 +33,8 @@ import QuickSearchToolbar from '@/components/DatagridCustomComponents/QuickSearc
 import AddEditAdministrator from "./AddEditAdministrator/AddEditAdministrator";
 
 
+// One shared key so the fetch and every invalidation (save,
+// delete, dialog close) hit the same cache entry
 const QUERY_KEY = ['admin-administrators'];
 
 
@@ -42,6 +46,9 @@ const QUERY_KEY = ['admin-administrators'];
 // -----------------------------------------------------------
 // StatusPill
 // -----------------------------------------------------------
+//
+// The Enabled cell: a green "Enabled" pill when the flag is
+// 1, a grey "Disabled" pill otherwise.
 //
 // Used by:
 //   - ADMINISTRATORS_COLUMNS (below)
@@ -73,7 +80,9 @@ function StatusPill({ enabled }) {
 // -----------------------------------------------------------
 //
 // Module level: nothing here depends on component state, so
-// the column set is not rebuilt on every render.
+// the column set is not rebuilt on every render. The `admin`
+// field the GET also returns has no column — every account
+// of this app is an administrator.
 //
 // Used by:
 //   - AdministratorsListTable (below)
@@ -103,6 +112,23 @@ const ADMINISTRATORS_COLUMNS = [
   },
 ];
 
+
+
+
+
+
+
+// -----------------------------------------------------------
+// AdministratorsListTable (default export)
+// -----------------------------------------------------------
+//
+// The DataGrid plus the conditionally mounted dialog. A row
+// click edits, the toolbar's Add new inserts — both remember
+// the clicked rectangle so the dialog can fly out of it.
+//
+// Used by:
+//   - AdministratorsList.jsx — the page body
+// -----------------------------------------------------------
 
 export default function AdministratorsListTable() {
 
@@ -165,6 +191,8 @@ export default function AdministratorsListTable() {
 
           initialState={{
             columns: {
+              // dead config: an empty visibility model hides
+              // nothing (kept as found)
               columnVisibilityModel: {
               },
             },

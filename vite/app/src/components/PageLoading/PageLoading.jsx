@@ -17,6 +17,26 @@
 
 import CircularProgress from '@mui/material/CircularProgress';
 
+
+
+
+
+
+
+// -----------------------------------------------------------
+// PageLoading (default export)
+// -----------------------------------------------------------
+//
+// The spinner column itself: fills its wrapper, centers the
+// progress ring, and shows the grey label only when one is
+// given.
+//
+// Used by:
+//   - FlowsDashboard — both tabs, while Prefect answers
+//   - DataSources — while the comparison file loads
+//   - GeneralChart — while the statistics file loads
+// -----------------------------------------------------------
+
 export default function PageLoading({ label }) {
   return (
     <div className="flex-1 h-full min-h-[200px] flex flex-col items-center justify-center gap-3 p-5">

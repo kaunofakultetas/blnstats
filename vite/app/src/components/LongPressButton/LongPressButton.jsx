@@ -8,14 +8,17 @@
 //  The toasts land in the outlet AdminPageLayout mounts, so
 //  these buttons belong inside the admin section.
 //
-//  Split into small pieces (main component near the end):
+//  The presets sit above the root component and lean on
+//  function hoisting to reference it.
 //
-//    useLongPress           — press state + rAF progress loop
-//    PressProgress          — circular progress ring
-//    ButtonTooltip          — tooltip that works when disabled
-//    LongPressButton        — the button itself (default export)
-//    LongPressDeleteButton  — red "delete" preset
-//    LongPressIconButton    — IconButton flavor
+//  Split into (root component last):
+//
+//    useLongPress          — press state + rAF progress loop
+//    PressProgress         — circular progress ring
+//    ButtonTooltip         — tooltip that works when disabled
+//    LongPressDeleteButton — red "delete" preset
+//    LongPressIconButton   — IconButton flavor
+//    LongPressButton       — the button itself (default export)
 //
 //  Imported via the folder's index.js:
 //    @/components/LongPressButton
@@ -26,6 +29,8 @@ import { Button, IconButton, CircularProgress, Tooltip } from "@mui/material";
 import toast from 'react-hot-toast';
 
 
+// 3 s default hold — long enough that a stray click or an
+// accidental touch can never fire the action
 const DEFAULT_DURATION = 3000;
 
 
@@ -42,6 +47,14 @@ const DEFAULT_DURATION = 3000;
 // started (null = not pressed). While it is set an rAF loop
 // advances progress; the effect cleanup stops that loop, so
 // unmounting mid-press is covered too.
+//
+// The buttons wire `cancel` to touchcancel alongside
+// touchend/mouseup/mouseleave, so an OS-interrupted touch
+// (incoming call, browser gesture) aborts the hold instead
+// of letting the action fire with no finger down.
+//
+// Used by:
+//   - LongPressIconButton, LongPressButton (below)
 // -----------------------------------------------------------
 
 function useLongPress({ onComplete, disabled, duration, completedToastMessage, uncompletedToastMessage }) {
@@ -114,6 +127,9 @@ function useLongPress({ onComplete, disabled, duration, completedToastMessage, u
 //
 // MUI's own stroke transition is switched off so the ring
 // tracks the rAF-driven value instead of lagging behind it.
+//
+// Used by:
+//   - LongPressIconButton, LongPressButton (below)
 // -----------------------------------------------------------
 
 function PressProgress({ progress, size, thickness, color, bgColor }) {
@@ -169,6 +185,9 @@ function PressProgress({ progress, size, thickness, color, bgColor }) {
 // The button is wrapped in a <span> so the tooltip works on
 // disabled buttons too — a disabled element fires no hover
 // events of its own.
+//
+// Used by:
+//   - LongPressButton (below)
 // -----------------------------------------------------------
 
 function ButtonTooltip({ tooltip, fullWidth, children }) {
@@ -199,95 +218,13 @@ function ButtonTooltip({ tooltip, fullWidth, children }) {
 
 
 // -----------------------------------------------------------
-// LongPressButton (default export)
-// -----------------------------------------------------------
-//
-// Used by:
-//   - LongPressDeleteButton (below)
-//   - WorkflowTemplateCard — the "Run Now" button, so a
-//     stray click cannot launch a pipeline
-// -----------------------------------------------------------
-
-export default function LongPressButton({
-  onComplete,
-  disabled = false,
-  duration = DEFAULT_DURATION,
-
-  children,
-  pressedContent,          // shown instead of the ring while held
-
-  color = "error",
-  variant = "contained",
-  fullWidth = false,
-  size = "medium",
-  sx = {},
-
-  completedToastMessage,
-  uncompletedToastMessage,
-
-  tooltip = "",
-
-  progressSize = 24,
-  progressThickness = 4,
-  progressColor = "white",
-  progressBgColor = "rgba(255,255,255,0.3)",
-
-  ...buttonProps
-}) {
-
-  const { isPressed, progress, start, cancel } = useLongPress({
-    onComplete,
-    disabled,
-    duration,
-    completedToastMessage,
-    uncompletedToastMessage,
-  });
-
-  return (
-    <ButtonTooltip tooltip={tooltip} fullWidth={fullWidth}>
-      <Button
-        variant={variant}
-        color={color}
-        fullWidth={fullWidth}
-        size={size}
-        disabled={disabled}
-        onMouseDown={start}
-        onMouseUp={cancel}
-        onMouseLeave={cancel}
-        onTouchStart={start}
-        onTouchEnd={cancel}
-        onContextMenu={(e) => e.preventDefault()} // long press opens it on touch
-        sx={{
-          userSelect: 'none', // holding otherwise selects the label
-          ...sx,
-        }}
-        {...buttonProps}
-      >
-        {isPressed
-          ? (pressedContent || (
-              <PressProgress
-                progress={progress}
-                size={progressSize}
-                thickness={progressThickness}
-                color={progressColor}
-                bgColor={progressBgColor}
-              />
-            ))
-          : children}
-      </Button>
-    </ButtonTooltip>
-  );
-}
-
-
-
-
-
-
-
-// -----------------------------------------------------------
 // LongPressDeleteButton (exported)
 // -----------------------------------------------------------
+//
+// Red "delete" preset. Dead weight, kept as is: color="error"
+// merely repeats LongPressButton's own default, and the two
+// toast props it re-passes would ride along in {...props}
+// anyway — the preset currently adds nothing but its name.
 //
 // Used by:
 //   - AddEditAdministrator — the "Delete Record" button of
@@ -360,6 +297,7 @@ export function LongPressIconButton({
       onMouseLeave={cancel}
       onTouchStart={start}
       onTouchEnd={cancel}
+      onTouchCancel={cancel}
       onContextMenu={(e) => e.preventDefault()}
       {...buttonProps}
     >
@@ -373,5 +311,97 @@ export function LongPressIconButton({
         />
       ) : children}
     </IconButton>
+  );
+}
+
+
+
+
+
+
+
+// -----------------------------------------------------------
+// LongPressButton (default export)
+// -----------------------------------------------------------
+//
+// The full MUI Button flavor: optional tooltip via
+// ButtonTooltip, and while held the label gives way to the
+// progress ring or the caller's `pressedContent`.
+//
+// Used by:
+//   - LongPressDeleteButton (above)
+//   - WorkflowTemplateCard — the "Run Now" button, so a
+//     stray click cannot launch a pipeline
+// -----------------------------------------------------------
+
+export default function LongPressButton({
+  onComplete,
+  disabled = false,
+  duration = DEFAULT_DURATION,
+
+  children,
+  pressedContent,          // shown instead of the ring while held
+
+  color = "error",
+  variant = "contained",
+  fullWidth = false,
+  size = "medium",
+  sx = {},
+
+  completedToastMessage,
+  uncompletedToastMessage,
+
+  tooltip = "",
+
+  progressSize = 24,
+  progressThickness = 4,
+  progressColor = "white",
+  progressBgColor = "rgba(255,255,255,0.3)",
+
+  ...buttonProps
+}) {
+
+  const { isPressed, progress, start, cancel } = useLongPress({
+    onComplete,
+    disabled,
+    duration,
+    completedToastMessage,
+    uncompletedToastMessage,
+  });
+
+  return (
+    <ButtonTooltip tooltip={tooltip} fullWidth={fullWidth}>
+      <Button
+        variant={variant}
+        color={color}
+        fullWidth={fullWidth}
+        size={size}
+        disabled={disabled}
+        onMouseDown={start}
+        onMouseUp={cancel}
+        onMouseLeave={cancel}
+        onTouchStart={start}
+        onTouchEnd={cancel}
+        onTouchCancel={cancel}
+        onContextMenu={(e) => e.preventDefault()} // long press opens it on touch
+        sx={{
+          userSelect: 'none', // holding otherwise selects the label
+          ...sx,
+        }}
+        {...buttonProps}
+      >
+        {isPressed
+          ? (pressedContent || (
+              <PressProgress
+                progress={progress}
+                size={progressSize}
+                thickness={progressThickness}
+                color={progressColor}
+                bgColor={progressBgColor}
+              />
+            ))
+          : children}
+      </Button>
+    </ButtonTooltip>
   );
 }

@@ -74,6 +74,18 @@ const ACTIONS = [
 
 
 
+// -----------------------------------------------------------
+// QuickActions (default export)
+// -----------------------------------------------------------
+//
+// The "Quick Actions" card: one trigger button per ACTIONS
+// entry, disabled with an explanatory tooltip when its
+// deployment is not among the served names.
+//
+// Used by:
+//   - FlowsDashboard — above the tabs
+// -----------------------------------------------------------
+
 export default function QuickActions({ triggerWorkflow, deploymentNames = [] }) {
   return (
     <Card className="mb-6">

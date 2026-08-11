@@ -12,6 +12,23 @@
 
 import AdministratorsListTable from "./AdministratorsListTable/AdministratorsListTable";
 
+
+
+
+
+
+
+// -----------------------------------------------------------
+// AdministratorsList (default export)
+// -----------------------------------------------------------
+//
+// Nothing but the mount point — AdministratorsListTable
+// carries the whole page.
+//
+// Used by:
+//   - router.jsx — route /admin/administrators
+// -----------------------------------------------------------
+
 export default function AdministratorsList() {
   return <AdministratorsListTable />;
 }

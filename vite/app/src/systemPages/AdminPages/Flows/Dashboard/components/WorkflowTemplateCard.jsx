@@ -25,6 +25,23 @@ import {
 import { LongPressButton } from '@/components/LongPressButton';
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// WorkflowTemplateCard (default export)
+// -----------------------------------------------------------
+//
+// The card: name and description, the optional duration and
+// last-run captions, and the hold-to-confirm Run Now beside
+// the two decorative buttons.
+//
+// Used by:
+//   - WorkflowTemplates — one card per deployment
+// -----------------------------------------------------------
+
 export default function WorkflowTemplateCard({ template, triggerWorkflow }) {
   return (
     <Card className="h-full">

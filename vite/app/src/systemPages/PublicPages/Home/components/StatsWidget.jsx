@@ -13,6 +13,23 @@
 import { Card, Typography } from '@mui/material';
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// StatsWidget (default export)
+// -----------------------------------------------------------
+//
+// Icon, caption and value stacked in a centered column; the
+// change row — the percent over its date label — appears only
+// when changePercent is provided.
+//
+// Used by:
+//   - Home — the three headline cards
+// -----------------------------------------------------------
+
 export default function StatsWidget({
   icon: Icon,
   title,
@@ -38,7 +55,7 @@ export default function StatsWidget({
           <span className={`text-sm font-medium ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
             {isPositive ? '+' : ''}{changePercent}%
           </span>
-          <span className="text-gray-500 text-xs ml-1">
+          <span className="text-gray-500 text-xs">
             {changeLabel}
           </span>
         </div>

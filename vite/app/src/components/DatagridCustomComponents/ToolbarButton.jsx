@@ -19,6 +19,23 @@
 import { Button } from '@mui/material';
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// ToolbarButton (default export)
+// -----------------------------------------------------------
+//
+// A brand-colored contained Button at the toolbar's 40px
+// height; renders the optional icon before the label and
+// hands the click event through untouched.
+//
+// Used by:
+//   - QuickSearchToolbar — the "add new" button
+// -----------------------------------------------------------
+
 export default function ToolbarButton({ onClick, label, icon: Icon }) {
   return (
     <Button

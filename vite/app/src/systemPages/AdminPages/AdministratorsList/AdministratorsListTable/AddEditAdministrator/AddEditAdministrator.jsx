@@ -43,6 +43,9 @@ import { LongPressDeleteButton } from '@/components/LongPressButton';
 // blankAdministrator
 // -----------------------------------------------------------
 //
+// The form state a fresh Add new dialog opens with: enabled
+// and admin already 1, every text field empty.
+//
 // Used by:
 //   - AddEditAdministrator (below) — the insert case
 // -----------------------------------------------------------
@@ -120,6 +123,10 @@ function ModalActions({ isEditing, disableSave, onSave, onDelete }) {
 // -----------------------------------------------------------
 // FormFields
 // -----------------------------------------------------------
+//
+// The stacked inputs: read-only ID, email, the Enabled
+// select, and the password pair — hidden in edit mode until
+// "Change Password" is pressed.
 //
 // Used by:
 //   - AddEditAdministrator (below) — the modal children
@@ -199,6 +206,24 @@ function FormFields({ data, setData, isEditing, changePassword, setChangePasswor
 }
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// AddEditAdministrator (default export)
+// -----------------------------------------------------------
+//
+// Holds the form state and the POST. Renders nothing until
+// the effect has seeded the form from rowData (edit) or the
+// blank (insert), so the fields never flash stale values.
+//
+// Used by:
+//   - AdministratorsListTable — row click (edit) and the
+//     toolbar's Add new (create)
+// -----------------------------------------------------------
+
 export default function AddEditAdministrator({ rowData, setOpen, getData, sourceRect }) {
 
   const [data, setData] = useState(undefined);
@@ -228,7 +253,10 @@ export default function AddEditAdministrator({ rowData, setOpen, getData, source
 
 
   // The grid refreshes and the dialog closes whatever the
-  // answer was; a rejected save leaves its reason in the toast
+  // answer was; a rejected save leaves its reason in the toast.
+  // BUG (backend, documented not fixed): inserts use INSERT
+  // IGNORE, so a duplicate email answers { type: 'ok' } and the
+  // toast says Saved although no row was created.
   async function sendData(postData) {
     try {
       const response = await axios.post("/api/admin/administrators", postData, { withCredentials: true });
@@ -279,6 +307,8 @@ export default function AddEditAdministrator({ rowData, setOpen, getData, source
   // Inserting, or editing with "Change Password" pressed,
   // needs two matching non-empty passwords; editing without
   // touching them leaves both empty, which is allowed.
+  // Non-empty is also all the backend enforces — its "at least
+  // 8 characters" error message only fires on an empty one.
   const disableSave =
     (changePassword && (!passwordsMatch || data.password === '' || data.confirmPassword === '')) ||
     (data.email.trim() === '');

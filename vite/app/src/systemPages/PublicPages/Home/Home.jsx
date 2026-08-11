@@ -8,11 +8,14 @@
 //  Everything comes from one generated file served by Caddy,
 //  /rawdata/GENERATED/General_Stats/20XX-XX-01.json, keyed by
 //  block height. The cards compare its last two keys; a
-//  missing file is not an error state, the cards fall back to
-//  em dashes and the charts show their own filler.
+//  missing or too-short file is not an error state, the cards
+//  fall back to em dashes and the charts show their own
+//  filler.
 //
-//  Used by:
-//    - router.jsx — route / (inside PublicPageLayout)
+//  Split into (root component last):
+//
+//    percentChange — month-over-month % change
+//    Home          — the page itself (default export)
 // -----------------------------------------------------------
 
 import { useQuery } from '@tanstack/react-query';
@@ -26,6 +29,10 @@ import StatsWidget from './components/StatsWidget';
 import GeneralChart from './components/GeneralChart';
 
 
+// "20XX-XX-01" is not a placeholder to substitute — the
+// backend saves the monthly series under that literal name
+// (dateMask in generateGeneralStatisticsCharts,
+// backend/blnstats/__init__.py)
 const GENERAL_STATS_URL = '/rawdata/GENERATED/General_Stats/20XX-XX-01.json';
 
 
@@ -53,6 +60,18 @@ function percentChange(current, previous) {
 
 
 
+// -----------------------------------------------------------
+// Home (default export)
+// -----------------------------------------------------------
+//
+// One fetch feeds everything: the file's two newest snapshots
+// become the cards' comparison row, and the raw file goes to
+// the three GeneralCharts untouched.
+//
+// Used by:
+//   - router.jsx — route / (inside PublicPageLayout)
+// -----------------------------------------------------------
+
 export default function Home() {
 
   // A static generated file — nothing invalidates it mid-visit
@@ -63,15 +82,20 @@ export default function Home() {
   });
 
 
+  // A file with fewer than two snapshots is treated like a
+  // missing one: latest/prev stay null, so the cards fall back
+  // to the same em-dash placeholders below.
   let latest = null, prev = null, lastDate = null, prevDate = null;
   if (rawData && rawData.data) {
     const keys = Object.keys(rawData.data).sort((a, b) => Number(a) - Number(b));
-    const lastKey = keys[keys.length - 1];
-    const prevKey = keys[keys.length - 2];
-    latest = rawData.data[lastKey];
-    prev = rawData.data[prevKey];
-    lastDate = rawData.data[lastKey]["date"];
-    prevDate = rawData.data[prevKey]["date"];
+    if (keys.length >= 2) {
+      const lastKey = keys[keys.length - 1];
+      const prevKey = keys[keys.length - 2];
+      latest = rawData.data[lastKey];
+      prev = rawData.data[prevKey];
+      lastDate = rawData.data[lastKey]["date"];
+      prevDate = rawData.data[prevKey]["date"];
+    }
   }
 
   // Without two snapshots the cards get no changePercent at

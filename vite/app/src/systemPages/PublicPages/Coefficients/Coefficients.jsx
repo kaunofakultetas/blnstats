@@ -26,6 +26,22 @@
 import GeneratedImage from "@/components/GeneratedImage/GeneratedImage";
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// AVAILABLE_COEFFICIENTS
+// -----------------------------------------------------------
+//
+// The sections of the page, in render order. "Top 10 Percent
+// Control Sum" is deliberately not listed — see the header.
+//
+// Used by:
+//   - Coefficients (below)
+// -----------------------------------------------------------
+
 const AVAILABLE_COEFFICIENTS = [
   "Gini",
   "HHI",
@@ -38,6 +54,22 @@ const AVAILABLE_COEFFICIENTS = [
 ];
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// COEFFICIENT_DESCRIPTIONS
+// -----------------------------------------------------------
+//
+// The explanation paragraph over each pair of charts, keyed
+// by the coefficient names chartUrl turns into folder names.
+//
+// Used by:
+//   - Coefficients (below)
+// -----------------------------------------------------------
+
 const COEFFICIENT_DESCRIPTIONS = {
   "Gini": "The Gini coefficient is a number between 0 and 1 that measures how evenly something—like income, wealth, or resources—is distributed across a group of people. A Gini coefficient of 0 means perfect equality, where everyone has exactly the same amount, while a Gini coefficient of 1 means total inequality, where one person has everything and everyone else has nothing. It's often used to understand economic inequality but can be applied to any situation where distribution matters.",
   "HHI": "The Herfindahl-Hirschman Index (HHI) is a measure of market concentration that shows how evenly or unevenly control is distributed among participants in a market or system. It is calculated by squaring the market share of each participant and then summing those squares. The HHI ranges from close to 0 (very competitive, many small players) to 10,000 (a monopoly, where one player has 100% control). In simple terms, a lower HHI means more decentralization and competition, while a higher HHI means more centralization and dominance by a few players.",
@@ -46,8 +78,8 @@ const COEFFICIENT_DESCRIPTIONS = {
   "Shannon Entropy": "Shannon entropy is a measure from information theory that quantifies the average amount of uncertainty or information contained in a set of possible outcomes. It is calculated by summing the probabilities of each outcome multiplied by the logarithm of their inverse probabilities. The higher the entropy, the more unpredictable or diverse the outcomes are; if one outcome is certain, the entropy is zero because there is no uncertainty. Unlike the normalized version, Shannon entropy is measured in bits (or another log base unit) and depends on the number of possible outcomes and their probabilities, so its value is not limited to a fixed range.",
   "Normalized Theil": "The normalized Theil Index is a version of the Theil Index scaled to range between 0 and 1, where 0 represents perfect equality (everyone has the same share) and 1 indicates maximum inequality (one person has everything). This normalization makes it easier to compare inequality across different populations or datasets by putting all values on a common scale. Like the original Theil Index, it measures how unevenly a resource like income is distributed, but the normalized form provides a clear, standardized way to interpret inequality levels.",
   "Theil": "The Theil Index is a measure of inequality that quantifies how unevenly a resource, like income or wealth, is distributed within a population. It's based on information theory and captures the difference between the actual distribution and perfect equality. A Theil Index of 0 means everyone has the same amount (perfect equality), while higher values indicate greater inequality. One advantage of the Theil Index is that it can be broken down to show inequality within subgroups and between subgroups, helping to identify where disparities come from.",
-  "Top 10 Percent Control Percentage": "Calculated to show how much of the network's recources are controlled by the top 10% of nodes.",
-  "Top 10 Percent Control Sum": "Calculated to show how much of the network's recources are controlled by the top 10% of nodes.",
+  "Top 10 Percent Control Percentage": "Calculated to show how much of the network's resources are controlled by the top 10% of nodes.",
+  "Top 10 Percent Control Sum": "Calculated to show how much of the network's resources are controlled by the top 10% of nodes.",
 };
 
 
@@ -70,6 +102,24 @@ function chartUrl(coefficient, metric) {
   return `/rawdata/GENERATED/EntitiesNodes/${metric}/${folder}/20XX-03-01/6x6_Full.svg?inline=true`;
 }
 
+
+
+
+
+
+
+// -----------------------------------------------------------
+// Coefficients (default export)
+// -----------------------------------------------------------
+//
+// One section per AVAILABLE_COEFFICIENTS entry: heading, its
+// description paragraph, then the degree and weighted-degree
+// charts side by side (stacked on small screens).
+//
+// Used by:
+//   - router.jsx — route /coefficients (inside
+//     PublicPageLayout)
+// -----------------------------------------------------------
 
 export default function Coefficients() {
   return (

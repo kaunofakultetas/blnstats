@@ -14,6 +14,23 @@ import { loadSlim } from "tsparticles-slim";
 import { useCallback, useEffect, useState } from "react";
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// ParticlesComponent (default export)
+// -----------------------------------------------------------
+//
+// Builds the tsparticles options around one responsive input
+// — particle count from window width at mount — and hands
+// the engine to loadSlim exactly once via the init callback.
+//
+// Used by:
+//   - Login — fixed background layer of the page
+// -----------------------------------------------------------
+
 export default function ParticlesComponent(props) {
 
   const [particleNumber, setParticleNumber] = useState(0);
@@ -76,5 +93,7 @@ export default function ParticlesComponent(props) {
     await loadSlim(engine);
   }, []);
 
+  // No caller passes an id today (Login renders <Particles />
+  // bare), so the canvas keeps the library's default id
   return <Particles id={props.id} init={particlesInit} options={options} />;
 }

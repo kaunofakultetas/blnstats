@@ -105,6 +105,22 @@ function Section({ title, paragraphs }) {
 }
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// About (default export)
+// -----------------------------------------------------------
+//
+// One card: the page heading, then every SECTIONS entry
+// rendered through Section in array order.
+//
+// Used by:
+//   - router.jsx — route /about (inside PublicPageLayout)
+// -----------------------------------------------------------
+
 export default function About() {
   return (
     <div className="w-full">

@@ -17,6 +17,23 @@
 const FALLBACK_SRC = "/no-data-found.jpeg";
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// GeneratedImage (default export)
+// -----------------------------------------------------------
+//
+// An <img> that swaps itself to the fallback at most once —
+// the src guard breaks the onError loop a missing
+// placeholder would otherwise cause.
+//
+// Used by:
+//   - Snapshots, Coefficients, LorenzCurves, DataSources
+// -----------------------------------------------------------
+
 export default function GeneratedImage({ src, alt, className, style }) {
   return (
     <img

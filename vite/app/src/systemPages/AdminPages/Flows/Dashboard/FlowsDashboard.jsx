@@ -65,8 +65,9 @@ const TRIGGER_REFRESH_DELAY_MS = 1500;
 // calculateDuration
 // -----------------------------------------------------------
 //
-// The largest unit that still reads well. A run still going
-// is measured against now.
+// The largest unit that still reads well. Any run with an end
+// time gets a duration whatever its status; a run still going
+// (running, cancelling) is measured against now.
 //
 // Used by:
 //   - processFlowRunData (below)
@@ -74,9 +75,9 @@ const TRIGGER_REFRESH_DELAY_MS = 1500;
 
 const calculateDuration = (startTime, endTime, status) => {
   if (!startTime) return null;
+  if (!endTime && status !== 'running' && status !== 'cancelling') return null;
   const start = new Date(startTime);
   const end = endTime ? new Date(endTime) : new Date();
-  if (status !== 'completed' && status !== 'running') return null;
   const durationMs = end - start;
   if (durationMs < 1000) return `${durationMs}ms`;
   if (durationMs < 60000) return `${Math.round(durationMs / 1000)}s`;
@@ -94,9 +95,11 @@ const calculateDuration = (startTime, endTime, status) => {
 // mapPrefectStateToStatus
 // -----------------------------------------------------------
 //
-// Prefect's state types collapsed into the five the cards
+// Prefect's state types collapsed into the six the cards
 // know how to color: completed, running, pending, failed,
-// stopped.
+// stopped, cancelling. CRASHED counts as failed and PAUSED
+// as pending; a state type Prefect grows later falls back
+// to pending.
 //
 // Used by:
 //   - processFlowRunData (below)
@@ -106,9 +109,10 @@ const mapPrefectStateToStatus = (stateType) => {
   switch (stateType?.toLowerCase()) {
     case 'completed': return 'completed';
     case 'running': return 'running';
-    case 'pending': case 'scheduled': return 'pending';
-    case 'failed': return 'failed';
+    case 'pending': case 'scheduled': case 'paused': return 'pending';
+    case 'failed': case 'crashed': return 'failed';
     case 'cancelled': case 'canceled': return 'stopped';
+    case 'cancelling': return 'cancelling';
     default: return 'pending';
   }
 };
@@ -211,10 +215,13 @@ const processFlowRunData = (runs, flows, tasks, deployments) => {
 
 const fetchFlowRuns = async (deployments) => {
 
+  // All nine Prefect state types — CRASHED, PAUSED and
+  // CANCELLING included, so a run whose worker died stays on
+  // the dashboard as failed instead of vanishing.
   const runsResponse = await axios.post('/prefect/api/flow_runs/filter', {
     sort: "START_TIME_DESC",
     limit: 50,
-    flow_runs: { state: { type: { any_: ["RUNNING", "PENDING", "SCHEDULED", "COMPLETED", "FAILED", "CANCELLED"] } } }
+    flow_runs: { state: { type: { any_: ["RUNNING", "PENDING", "SCHEDULED", "COMPLETED", "FAILED", "CANCELLED", "CRASHED", "PAUSED", "CANCELLING"] } } }
   }, PREFECT_POST_CONFIG);
 
   const flowRuns = runsResponse.data;
@@ -238,6 +245,18 @@ const fetchFlowRuns = async (deployments) => {
 
 
 
+
+// -----------------------------------------------------------
+// FlowsDashboard (default export)
+// -----------------------------------------------------------
+//
+// Deployments (fetched once) feed the shortcut buttons and
+// Templates; the 10 s run poll fills Active Workflows; a
+// trigger toasts, then refreshes once Prefect registers it.
+//
+// Used by:
+//   - Flows.jsx — the /admin page body
+// -----------------------------------------------------------
 
 export default function FlowsDashboard() {
 
@@ -276,7 +295,6 @@ export default function FlowsDashboard() {
     id: d.id,
     name: d.name,
     description: d.description || 'Prefect deployment',
-    flowName: d.flow_name,
     lastRun: d.updated,
   })), [prefectDeployments]);
 

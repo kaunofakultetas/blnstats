@@ -26,6 +26,14 @@ import Header from "@/components/Header/Header";
 // -----------------------------------------------------------
 // Footer
 // -----------------------------------------------------------
+//
+// The 30px burgundy copyright strip; the login page repeats
+// the same text with its own styling instead of mounting
+// this.
+//
+// Used by:
+//   - PublicPageLayout (below)
+// -----------------------------------------------------------
 
 function Footer() {
   return (
@@ -40,6 +48,18 @@ function Footer() {
 
 
 
+
+// -----------------------------------------------------------
+// PublicPageLayout (default export)
+// -----------------------------------------------------------
+//
+// Header, then the page body in a centered padded column —
+// full-bleed when the route sets handle.fullWidth — sized so
+// Footer stays at the bottom even on short pages.
+//
+// Used by:
+//   - router.jsx — layout route around every public page
+// -----------------------------------------------------------
 
 export default function PublicPageLayout() {
 

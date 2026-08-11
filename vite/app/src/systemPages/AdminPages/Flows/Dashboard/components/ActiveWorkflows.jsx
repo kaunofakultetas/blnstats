@@ -13,6 +13,22 @@ import { Box } from '@mui/material';
 import WorkflowRunCard from './WorkflowRunCard';
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// ActiveWorkflows (default export)
+// -----------------------------------------------------------
+//
+// One WorkflowRunCard per run, or a grey "No active
+// workflows" placeholder when the list is empty.
+//
+// Used by:
+//   - FlowsDashboard — the first tab
+// -----------------------------------------------------------
+
 export default function ActiveWorkflows({ workflowRuns }) {
   return (
     <Box className="space-y-4">

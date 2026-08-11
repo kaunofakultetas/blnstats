@@ -20,6 +20,23 @@ const bounce = keyframes`
 `;
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// Loader
+// -----------------------------------------------------------
+//
+// The styled root: three 5px white dots riding the bounce
+// keyframe, the second and third delayed so the wave rolls
+// left to right.
+//
+// Used by:
+//   - BouncingDotsLoader (below)
+// -----------------------------------------------------------
+
 const Loader = styled('div')({
   display: 'flex',
   justifyContent: 'center',
@@ -43,6 +60,23 @@ const Loader = styled('div')({
   },
 });
 
+
+
+
+
+
+
+// -----------------------------------------------------------
+// BouncingDotsLoader (default export)
+// -----------------------------------------------------------
+//
+// Renders the three bare divs the Loader styles — no props,
+// no state, drop-in wherever a small white wait indicator
+// fits.
+//
+// Used by:
+//   - Login — the "PLEASE WAIT" state of the login button
+// -----------------------------------------------------------
 
 export default function BouncingDotsLoader() {
   return (

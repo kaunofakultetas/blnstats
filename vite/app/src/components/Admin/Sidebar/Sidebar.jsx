@@ -375,6 +375,10 @@ function MenuItemContent({ icon: Icon, label, open, active }) {
 // MenuItem
 // -----------------------------------------------------------
 //
+// One link row: a router <Link> for in-app pages, or — when
+// `external` — a plain <a> opening a new tab, since those
+// rows leave the SPA for the proxied subsystem containers.
+//
 // Used by:
 //   - SidebarLinks (below) — every item of every section
 // -----------------------------------------------------------
@@ -405,6 +409,10 @@ function MenuItem({ href, icon: Icon, label, open, active, external = false }) {
 // -----------------------------------------------------------
 // PinButton
 // -----------------------------------------------------------
+//
+// The burgundy dock/undock bar: filled pin when the panel is
+// pinned open, outlined while it only flies out on hover.
+// The tooltip names the action a click would take.
 //
 // Used by:
 //   - AdminSidebar (below) — first row of the list
@@ -440,6 +448,10 @@ function PinButton({ pinned, onToggle }) {
 // -----------------------------------------------------------
 // SidebarLinks
 // -----------------------------------------------------------
+//
+// The SECTIONS table rendered out: a SectionTitle per group,
+// then a MenuItem per link, with `activeHref` marking the
+// row that owns the current URL.
 //
 // Used by:
 //   - AdminSidebar (below) — inside the panel

@@ -13,6 +13,11 @@
 //  header offers Login. Only the admin section is gated, and
 //  that gate lives in AdminPageLayout.
 //
+//  The admin field is decoration for now: the backend
+//  hardcodes it to 1 (api/auth/routes.py ignores
+//  current_user.admin) and no frontend code reads it — every
+//  consumer only checks that authData exists.
+//
 //  Used by:
 //    - App.jsx — AuthProvider wraps every page except /login
 //    - Header — Login/Logout button and the Admin nav item
@@ -24,6 +29,8 @@ import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 
 
+// The default a consumer sees OUTSIDE AuthProvider —
+// anonymous and never becoming ready
 const AuthContext = createContext({ authData: undefined, ready: false });
 
 
@@ -34,6 +41,15 @@ const AuthContext = createContext({ authData: undefined, ready: false });
 
 // -----------------------------------------------------------
 // useAuth
+// -----------------------------------------------------------
+//
+// Read access to the session: { authData, ready }. Outside
+// AuthProvider the context default applies — anonymous and
+// never ready — rather than a crash.
+//
+// Used by:
+//   - Header — Login/Logout button and the Admin nav item
+//   - AdminPageLayout — the admin-only gate
 // -----------------------------------------------------------
 
 export function useAuth() {
@@ -48,6 +64,14 @@ export function useAuth() {
 
 // -----------------------------------------------------------
 // AuthProvider
+// -----------------------------------------------------------
+//
+// Runs the one checkauth query and publishes { authData,
+// ready } through context, memoized so consumers re-render
+// only when the session answer itself changes.
+//
+// Used by:
+//   - App.jsx — wraps every page except /login
 // -----------------------------------------------------------
 
 export function AuthProvider({ children }) {

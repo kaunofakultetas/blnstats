@@ -11,16 +11,20 @@
 //  and the dialog flies out of that element and back into it
 //  on close; without it it grows from the screen center.
 //
-//  Split into (main component, then presets):
+//  The presets sit above the root component and lean on
+//  function hoisting to reference it.
 //
-//    VARIANTS / ModalHeader / StandardActions — internals
-//    UniversalModal   — the modal itself (default export)
-//    ConfirmModal / DeleteModal / AlertModal / WarningModal
-//                     — presets; nothing renders them yet
+//  Split into (root component last):
 //
-//  Used by:
-//    - AddEditAdministrator — the administrator dialog, with
-//      custom `actions` and the stock buttons hidden
+//    FLIGHT_MS       — the one flow-animation duration
+//    VARIANTS        — per-variant icon + color table
+//    ModalHeader     — icon, title, description, close (×)
+//    StandardActions — the stock Confirm/Cancel footer
+//    ConfirmModal    — "are you sure?" preset
+//    DeleteModal     — danger delete preset
+//    AlertModal      — info notice preset
+//    WarningModal    — warning notice preset
+//    UniversalModal  — the modal itself (default export)
 //
 //  Imported via the folder's index.js:
 //    @/components/UniversalModal
@@ -50,6 +54,23 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 // identical or the close flight gets cut off before landing.
 const FLIGHT_MS = 400;
 
+
+
+
+
+
+
+// -----------------------------------------------------------
+// VARIANTS
+// -----------------------------------------------------------
+//
+// Per-variant header icon and the color fed to both that icon
+// and the stock Confirm button. "default" has no icon at all.
+//
+// Used by:
+//   - UniversalModal (below) — picked by the `variant` prop;
+//     unknown values fall back to "default"
+// -----------------------------------------------------------
 
 const VARIANTS = {
   default: {
@@ -90,6 +111,9 @@ const VARIANTS = {
 // -----------------------------------------------------------
 //
 // Header row: variant icon, title, description, close (×).
+//
+// Used by:
+//   - UniversalModal (below)
 // -----------------------------------------------------------
 
 function ModalHeader({ icon: Icon, iconColor, title, description, hasBody, showCloseButton, onClose }) {
@@ -162,6 +186,9 @@ function ModalHeader({ icon: Icon, iconColor, title, description, hasBody, showC
 // -----------------------------------------------------------
 //
 // Footer bar used when the caller passes no custom `actions`.
+//
+// Used by:
+//   - UniversalModal (below)
 // -----------------------------------------------------------
 
 function StandardActions({ showCancel, cancelText, onCancel, showConfirm, confirmText, confirmColor, onConfirm, confirmDisabled, loading }) {
@@ -202,6 +229,158 @@ function StandardActions({ showCancel, cancelText, onCancel, showConfirm, confir
   );
 }
 
+
+
+
+
+
+
+// -----------------------------------------------------------
+// ConfirmModal
+// -----------------------------------------------------------
+//
+// Generic "are you sure?" — default variant, Confirm/Cancel.
+//
+// Used by:
+//   - nothing renders it yet — only re-exported by index.js
+// -----------------------------------------------------------
+
+export function ConfirmModal({
+  title = "Confirm Action",
+  confirmText = "Confirm",
+  ...props
+}) {
+  return (
+    <UniversalModal
+      title={title}
+      confirmText={confirmText}
+      showCancel={true}
+      {...props}
+    />
+  );
+}
+
+
+
+
+
+
+
+// -----------------------------------------------------------
+// DeleteModal
+// -----------------------------------------------------------
+//
+// Delete confirmation — danger variant, irreversible wording.
+// The caller supplies onConfirm with the actual delete call.
+//
+// Used by:
+//   - nothing renders it yet — only re-exported by index.js
+// -----------------------------------------------------------
+
+export function DeleteModal({
+  title = "Delete",
+  description = "Are you sure you want to delete? This action is irreversible.",
+  confirmText = "Delete",
+  ...props
+}) {
+  return (
+    <UniversalModal
+      title={title}
+      description={description}
+      confirmText={confirmText}
+      variant="danger"
+      {...props}
+    />
+  );
+}
+
+
+
+
+
+
+
+// -----------------------------------------------------------
+// AlertModal
+// -----------------------------------------------------------
+//
+// Informational notice — info variant, a single "OK" button
+// since there is nothing to cancel.
+//
+// Used by:
+//   - nothing renders it yet — only re-exported by index.js
+// -----------------------------------------------------------
+
+export function AlertModal({
+  title = "Information",
+  confirmText = "OK",
+  showCancel = false,
+  ...props
+}) {
+  return (
+    <UniversalModal
+      title={title}
+      confirmText={confirmText}
+      showCancel={showCancel}
+      variant="info"
+      {...props}
+    />
+  );
+}
+
+
+
+
+
+
+
+// -----------------------------------------------------------
+// WarningModal
+// -----------------------------------------------------------
+//
+// Warning notice — warning variant, "Understood" confirm.
+// Keeps Cancel so the caller can wire onCancel to back out.
+//
+// Used by:
+//   - nothing renders it yet — only re-exported by index.js
+// -----------------------------------------------------------
+
+export function WarningModal({
+  title = "Warning",
+  confirmText = "Understood",
+  ...props
+}) {
+  return (
+    <UniversalModal
+      title={title}
+      confirmText={confirmText}
+      variant="warning"
+      {...props}
+    />
+  );
+}
+
+
+
+
+
+
+
+// -----------------------------------------------------------
+// UniversalModal (default export)
+// -----------------------------------------------------------
+//
+// The dialog itself: an MUI Modal with a centered Paper, the
+// flow animation done by hand — flight state, start-pose
+// measurement and the delayed unmount all live here.
+//
+// Used by:
+//   - AddEditAdministrator — the administrator dialog: custom
+//     `actions`, both stock buttons hidden, closeRef and
+//     sourceRect wired
+//   - ConfirmModal / DeleteModal / AlertModal / WarningModal
+//     (above) — thin prop-filling wrappers
+// -----------------------------------------------------------
 
 export default function UniversalModal({
   open,
@@ -373,8 +552,11 @@ export default function UniversalModal({
     <Modal
       open={mounted}
       onClose={handleBackdropClick}
-      aria-labelledby="universal-modal-title"
-      aria-describedby="universal-modal-description"
+      // Each aria id is set only when ModalHeader will render
+      // the Typography node it targets — a missing title or
+      // description would otherwise leave a dangling reference
+      aria-labelledby={title ? "universal-modal-title" : undefined}
+      aria-describedby={description ? "universal-modal-description" : undefined}
       slotProps={{
         backdrop: {
           sx: {
@@ -456,124 +638,5 @@ export default function UniversalModal({
         )}
       </Paper>
     </Modal>
-  );
-}
-
-
-
-
-
-
-
-// -----------------------------------------------------------
-// ConfirmModal
-// -----------------------------------------------------------
-//
-// Generic "are you sure?" — default variant, Confirm/Cancel.
-// -----------------------------------------------------------
-
-export function ConfirmModal({
-  title = "Confirm Action",
-  confirmText = "Confirm",
-  ...props
-}) {
-  return (
-    <UniversalModal
-      title={title}
-      confirmText={confirmText}
-      showCancel={true}
-      {...props}
-    />
-  );
-}
-
-
-
-
-
-
-
-// -----------------------------------------------------------
-// DeleteModal
-// -----------------------------------------------------------
-//
-// Delete confirmation — danger variant, irreversible wording.
-// The caller supplies onConfirm with the actual delete call.
-// -----------------------------------------------------------
-
-export function DeleteModal({
-  title = "Delete",
-  description = "Are you sure you want to delete? This action is irreversible.",
-  confirmText = "Delete",
-  ...props
-}) {
-  return (
-    <UniversalModal
-      title={title}
-      description={description}
-      confirmText={confirmText}
-      variant="danger"
-      {...props}
-    />
-  );
-}
-
-
-
-
-
-
-
-// -----------------------------------------------------------
-// AlertModal
-// -----------------------------------------------------------
-//
-// Informational notice — info variant, a single "OK" button
-// since there is nothing to cancel.
-// -----------------------------------------------------------
-
-export function AlertModal({
-  title = "Information",
-  confirmText = "OK",
-  showCancel = false,
-  ...props
-}) {
-  return (
-    <UniversalModal
-      title={title}
-      confirmText={confirmText}
-      showCancel={showCancel}
-      variant="info"
-      {...props}
-    />
-  );
-}
-
-
-
-
-
-
-
-// -----------------------------------------------------------
-// WarningModal
-// -----------------------------------------------------------
-//
-// Warning notice — warning variant, "Understood" confirm.
-// Keeps Cancel so the caller can wire onCancel to back out.
-// -----------------------------------------------------------
-
-export function WarningModal({
-  title = "Warning",
-  confirmText = "Understood",
-  ...props
-}) {
-  return (
-    <UniversalModal
-      title={title}
-      confirmText={confirmText}
-      variant="warning"
-      {...props}
-    />
   );
 }

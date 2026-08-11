@@ -20,6 +20,23 @@ import { Button } from '@mui/material';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 
 
+
+
+
+
+
+// -----------------------------------------------------------
+// ColumnsButton (default export)
+// -----------------------------------------------------------
+//
+// The brand-styled panel toggle: opens the grid's columns
+// panel through the api ref and tracks the open state
+// locally, so a second click closes instead of reopening.
+//
+// Used by:
+//   - QuickSearchToolbar — next to the quick filter
+// -----------------------------------------------------------
+
 export default function ColumnsButton({ label = "Columns" }) {
 
   const apiRef = useGridApiContext();
