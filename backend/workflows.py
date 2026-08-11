@@ -319,15 +319,10 @@ def import_lnd_dbreader_data(file_path):
 # import_ln_research_data
 ############################################################
 #
-# Wraps blnstats.importLNResearchData(). BUG, documented not
-# fixed: that wrapper does "from .data_import.ln_research
-# import LNResearch", but the module only defines
-# LNResearchData (whose __init__ performs the whole import;
-# there is no public import_data method either) — so this
-# task raises ImportError every time it runs, killing the
-# Full Initialization Flow at its first step. main.py's
-# --import-ln-research-data branch instantiates
-# LNResearchData directly and works.
+# Wraps blnstats.importLNResearchData(): the full LNResearch
+# import (LNResearchData() runs download/parse/insert in its
+# __init__) plus the alias-to-entity-cluster follow-up that
+# main.py's --import-ln-research-data branch skips.
 #
 # Used by:
 #   - ln_research_import_flow (below) — itself unused

@@ -389,11 +389,10 @@ class BlockchainBlocks:
     # retry rounds, or immediately (as BlockSyncError({}, 0))
     # when the chain tip cannot be fetched.
     #
-    # BUG (documented, not fixed): as in
-    # BlockchainTransactions.run, exhausting the retry budget
-    # purely through POOL-level exceptions leaves
-    # all_failed_blocks empty — the sync then ends WITHOUT
-    # raising despite permanently missing blocks.
+    # As in BlockchainTransactions.run, exhausting a batch's
+    # retry budget records every leftover height — including
+    # ones whose rounds only ever died at pool level — so the
+    # final check always raises.
     #
     # Used by:
     #   - synchronizeBlockchain() in blnstats/__init__.py —
@@ -479,16 +478,15 @@ class BlockchainBlocks:
                     
                     if failed_blocks:
                         logger.warning(f"Failed blocks in retry {retry_count + 1}: {[h for h, _ in failed_blocks]}")
+                        # trim to the actual failures so the batch log and
+                        # the exhaustion accounting below see the real
+                        # leftover set, not the round's input
+                        blocks_to_process = [h for h, _ in failed_blocks]
                         if retry_count < max_retries - 1:
-                            blocks_to_process = [h for h, _ in failed_blocks]
                             logger.info(f"Waiting {retry_delay} seconds before retrying {len(blocks_to_process)} failed blocks...")
                             time.sleep(retry_delay)
                         else:
-                            # last round — record as permanently failed.
-                            # NOTE: blocks_to_process is NOT trimmed here,
-                            # so the count logged after the loop is the
-                            # number that ENTERED this round, not the
-                            # number that actually failed in it
+                            # last round — record as permanently failed
                             for height, error_msg in failed_blocks:
                                 logger.error(f"Block {height} permanently failed after {max_retries} attempts: {error_msg}")
                                 all_failed_blocks[height] = error_msg
@@ -496,10 +494,6 @@ class BlockchainBlocks:
                         blocks_to_process = []  # All blocks successful
                         
                 except Exception as e:
-                    # BUG (documented, not fixed): if the retry budget
-                    # runs out through THIS branch, the leftover heights
-                    # never reach all_failed_blocks and the sync ends
-                    # without raising — see the banner
                     logger.error(f"Pool error syncing blocks {batch_start} to {batch_end} (attempt {retry_count + 1}): {e}")
                     if retry_count < max_retries - 1:
                         logger.info(f"Waiting {retry_delay} seconds before retrying due to pool error...")
@@ -510,6 +504,13 @@ class BlockchainBlocks:
             if not blocks_to_process:
                 logger.info(f"Batch {batch_start}-{batch_end} completed successfully")
             else:
+                # retry budget exhausted — heights whose final rounds
+                # died at pool level were never recorded by the
+                # last-round branch above; catch them here so STEP 3
+                # still raises (setdefault keeps the more specific
+                # per-height message when one exists)
+                for leftover in blocks_to_process:
+                    all_failed_blocks.setdefault(leftover, "retry budget exhausted (pool-level errors)")
                 logger.error(f"Batch {batch_start}-{batch_end} completed with {len(blocks_to_process)} permanently failed blocks")
 
 

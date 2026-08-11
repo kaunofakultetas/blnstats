@@ -79,8 +79,11 @@ def login_HTTPPOST():
 
     else:
         # burn a real bcrypt verification for unknown emails too — keeps the
-        # response time identical to the wrong-password path (anti-enumeration)
-        bcrypt.checkpw( str.encode("This Only Used to prevent time based user enumeration attack, so doing nothing there."),
+        # response time identical to the wrong-password path (anti-enumeration).
+        # [:72] because bcrypt >= 4 raises on longer passwords instead of
+        # truncating like the old versions did — without it this line 500s
+        # on every unknown-email login (the sentence is 86 bytes)
+        bcrypt.checkpw( str.encode("This Only Used to prevent time based user enumeration attack, so doing nothing there.")[:72],
                         str.encode('$2b$12$37rvWwtdP/sb.pZwBklPFeUxoH.KWOXIDjTxiiC9awCYpXIB8EbmS') )
         return "Incorrect email or password."
 

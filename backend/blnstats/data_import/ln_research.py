@@ -48,17 +48,12 @@ LATEST_LN_RESEARCH_DOWNLOAD_URL = "https://storage.googleapis.com/lnresearch/gos
 # happens in __init__. NOTE: _LNResearch_NodeAddresses is
 # written here but no backend code reads it at the moment.
 #
-# BUG (documented, not fixed): blnstats/__init__.py
-# importLNResearchData() runs
-# `from .data_import.ln_research import LNResearch` and then
-# `LNResearch().import_data()` — neither that class name nor
-# a public import_data() exists here, so the Prefect route
-# (workflows.py task import_ln_research_data, used by
-# ln_research_import_flow and full_initialization_flow) dies
-# with ImportError. Only the direct CLI path below works.
-#
 # Used by:
 #   - main.py --import-ln-research-data (CLI)
+#   - blnstats/__init__.py importLNResearchData() — the
+#     Prefect route (workflows.py task
+#     import_ln_research_data), which also folds the
+#     imported aliases into the entity tables afterwards
 ############################################################
 
 class LNResearchData:

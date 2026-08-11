@@ -600,9 +600,8 @@ class BlockchainTransactions:
     # "unspent" (a skipped candidate could BE the spend).
     #
     # GOTCHA: Electrum reports height 0 (or -1) for mempool
-    # transactions, so a mempool spend comes back as height 0
-    # — falsy for the caller; see the BUG note on
-    # retrieveAndWriteLightningBlockchainTxData.
+    # transactions — the caller treats those as not yet
+    # confirmed and records the output as still unspent.
     #
     # Used by:
     #   - retrieveAndWriteLightningBlockchainTxData (below)
@@ -739,15 +738,10 @@ class BlockchainTransactions:
     # as 999999999 (passed as a STRING — MySQL coerces it
     # into the BIGINT column).
     #
-    # BUG (documented, not fixed): a spend still in the
-    # mempool comes back from Electrum with height 0, which
-    # is falsy — the row is then written with
-    # SpendingBlockIndex = 999999999 ("unspent") but a
-    # non-empty SpendingTxID: an inconsistent pair until the
-    # spend confirms and a later 7-day recheck repairs it. A
-    # height of -1 (unconfirmed parents) would crash the
-    # INSERT into the UNSIGNED column and surface as a
-    # retryable failure instead.
+    # A spend still in the mempool (Electrum height 0 or -1)
+    # is not a confirmation — the row is written as unspent
+    # (sentinel + empty SpendingTxID) and the 7-day recheck
+    # picks the spend up once it is mined.
     #
     # Used by:
     #   - run (below) — pool.map over the pending outpoints
@@ -797,8 +791,13 @@ class BlockchainTransactions:
 
                     spending_block_height, spending_tx_id = self.__get_spending_time_for_output(tx_id, outputIndex, funding_script_hash_history)
 
-                    # height 0 (mempool spend) is falsy and slips
-                    # past this check — see the BUG note in the banner
+                    # a mempool spend (Electrum height 0 or -1) is not
+                    # confirmed yet — record the output as still unspent
+                    # and let the 7-day recheck pick the spend up once
+                    # it is mined
+                    if spending_tx_id and (spending_block_height or 0) <= 0:
+                        spending_block_height, spending_tx_id = None, None
+
                     if spending_block_height and spending_tx_id:
                         logger.info(f"Transaction {blockIndex}:{txIndex}:{outputIndex} ({shortChannelID}) -> SPENT in block {spending_block_height}, tx {spending_tx_id}")
 
@@ -862,14 +861,11 @@ class BlockchainTransactions:
     # TransactionSyncError when outpoints remain failed after
     # all retries.
     #
-    # BUG (documented, not fixed): if the retry budget is
-    # exhausted purely by POOL-level exceptions (the except
-    # branch of the retry loop), the leftover outpoints never
-    # reach all_failed_transactions — the run then finishes
-    # WITHOUT raising despite permanent failures. Also, an
-    # empty Lightning_Channels table makes MAX(BlockIndex)
-    # return NULL, so the "+ stepSize" arithmetic dies with a
-    # TypeError.
+    # Exhausting a window's retry budget records every
+    # leftover outpoint — including ones whose rounds only
+    # ever died at pool level — so the final check always
+    # raises. An empty Lightning_Channels table yields an
+    # empty scan range and the run ends as a no-op.
     #
     # Used by:
     #   - synchronizeBlockchain() in blnstats/__init__.py —
@@ -886,14 +882,16 @@ class BlockchainTransactions:
 
 
         # STEP 1: upper scan bound — one step past the highest
-        # funding block the gossip importers have seen (crashes
-        # here when Lightning_Channels is empty; see banner)
+        # funding block the gossip importers have seen
         # =====================================================
         highestChannelBlock = 0
         with get_db_connection() as db_conn:
             with db_conn.cursor() as db_cursor:
                 db_cursor.execute(' SELECT MAX(BlockIndex) FROM Lightning_Channels ')
-                highestChannelBlock = db_cursor.fetchone()[0] + stepSize
+                # MAX() is NULL on an empty Lightning_Channels —
+                # coalesce to 0 so a fresh install scans nothing
+                # instead of dying on None + int
+                highestChannelBlock = (db_cursor.fetchone()[0] or 0) + stepSize
 
 
         # STEP 2: walk the chain upward in 1000-block windows,
@@ -967,16 +965,15 @@ class BlockchainTransactions:
                             
                             if failed_transactions:
                                 logger.warning(f"Failed transactions in retry {retry_count + 1}: {[t[0] for t, _ in failed_transactions]}")
+                                # trim to the actual failures so the batch log
+                                # and the exhaustion accounting below see the
+                                # real leftover set, not the round's input
+                                transactions_to_process = [[t[0], t[1], t[2], t[3]] for (t, _) in failed_transactions]
                                 if retry_count < max_retries - 1:
-                                    transactions_to_process = [[t[0], t[1], t[2], t[3]] for (t, _) in failed_transactions]
                                     logger.info(f"Waiting {retry_delay} seconds before retrying {len(transactions_to_process)} failed transactions...")
                                     time.sleep(retry_delay)
                                 else:
-                                    # last round — record as permanently failed.
-                                    # NOTE: transactions_to_process is NOT trimmed
-                                    # here, so the count logged after the loop is
-                                    # the number that ENTERED this round, not the
-                                    # number that actually failed in it
+                                    # last round — record as permanently failed
                                     for transaction_info, error_msg in failed_transactions:
                                         logger.error(f"Transaction {transaction_info} permanently failed after {max_retries} attempts: {error_msg}")
                                         all_failed_transactions[transaction_info] = error_msg
@@ -984,11 +981,6 @@ class BlockchainTransactions:
                                 transactions_to_process = []  # All transactions successful
                                 
                         except Exception as e:
-                            # BUG (documented, not fixed): if the retry
-                            # budget runs out through THIS branch, the
-                            # leftover outpoints never reach
-                            # all_failed_transactions and the sync ends
-                            # without raising — see the banner
                             logger.error(f"Pool error processing transactions {fromBlock} to {toBlock} (attempt {retry_count + 1}): {e}")
                             if retry_count < max_retries - 1:
                                 logger.info(f"Waiting {retry_delay} seconds before retrying due to pool error...")
@@ -999,6 +991,13 @@ class BlockchainTransactions:
                     if not transactions_to_process:
                         logger.info(f"Batch {fromBlock}-{toBlock} completed successfully")
                     else:
+                        # retry budget exhausted — outpoints whose final
+                        # rounds died at pool level were never recorded by
+                        # the last-round branch above; catch them here so
+                        # STEP 3 still raises (setdefault keeps the more
+                        # specific per-outpoint message when one exists)
+                        for leftover in transactions_to_process:
+                            all_failed_transactions.setdefault(tuple(leftover), "retry budget exhausted (pool-level errors)")
                         logger.error(f"Batch {fromBlock}-{toBlock} completed with {len(transactions_to_process)} permanently failed transactions")
 
 

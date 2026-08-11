@@ -67,10 +67,9 @@ if __name__ == "__main__":
     # Instantiating the class IS the import: LNResearchData
     # downloads, parses and inserts inside its __init__. Unlike
     # the DBReader branch below, this path skips the alias-to-
-    # entity-cluster follow-up — and the package-level wrapper
-    # that would run it, blnstats.importLNResearchData, is
-    # broken (it imports a nonexistent LNResearch class; see
-    # workflows.py where that wrapper is actually called).
+    # entity-cluster follow-up that the package-level wrapper
+    # blnstats.importLNResearchData (used by the Prefect flows)
+    # runs afterwards.
     elif(sys.argv[1] == "--import-ln-research-data"):
         from blnstats.data_import.ln_research import LNResearchData
         LNResearchData()

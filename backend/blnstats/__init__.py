@@ -1150,32 +1150,27 @@ def importLNDDBReader(file_path):
 # importLNResearchData
 ############################################################
 #
-# BROKEN — raises ImportError when called:
-# data_import/ln_research.py only defines LNResearchData
-# (which imports in its constructor and has no public
-# import_data method); the LNResearch name imported here
-# does not exist. main.py's --import-ln-research-data flag
-# side-steps this wrapper and instantiates LNResearchData
-# directly, so only the Prefect flows hit the breakage.
-# Documented, not fixed.
+# Full LNResearch import: instantiating LNResearchData IS
+# the import (download, parse and insert happen in its
+# __init__), then the announced aliases are folded into the
+# entity tables — the follow-up main.py's
+# --import-ln-research-data flag skips.
 #
 # Used by:
 #   - workflows.py import_ln_research_data (@task) —
 #     ln_research_import_flow and full_initialization_flow
-#     (both fail at this task until the import is fixed)
 ############################################################
 
 def importLNResearchData():
-    # STEP 1: raw import into the staging tables — BROKEN,
-    # LNResearch does not exist (see banner)
+    # STEP 1: raw import into the staging tables — the
+    # constructor runs the whole pipeline
     # ====================================================
-    from .data_import.ln_research import LNResearch
-    LNResearch().import_data()
+    from .data_import.ln_research import LNResearchData
+    LNResearchData()
 
 
     # STEP 2: fold the announced aliases into the main
-    # table and rebuild the entity view of them —
-    # never reached today
+    # table and rebuild the entity view of them
     # ================================================
     entityObj = EntityClusters()
     entityObj.import_node_aliases_to_main_table(
