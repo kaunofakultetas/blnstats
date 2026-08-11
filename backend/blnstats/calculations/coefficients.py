@@ -324,16 +324,17 @@ class Coefficients:
     # calculate_nakamoto
     ############################################################
     #
-    # Nakamoto coefficient: the smallest k such that the k
-    # largest holders together reach the 51% threshold —
-    # searchsorted(cumsum(descending shares), 0.51) + 1.
+    # Nakamoto coefficient, textbook definition: the
+    # smallest k such that the k largest holders together
+    # control STRICTLY MORE than 50% of the total.
+    # Zero total returns 0 (undefined case); negatives
+    # raise ValueError.
     #
-    # NOTE (definition quirk, documented not fixed): the
-    # textbook definition is "strictly more than 50%"; the
-    # fixed 0.51 cutoff overcounts by one when the top k
-    # hold between 50% and 51%. Zero total returns 0 even
-    # though 1 is the documented minimum (undefined case).
-    # Negatives raise ValueError.
+    # METHODS NOTE (2026-08-11): values published before
+    # this date used a 0.51 cutoff, which overcounted by
+    # however many holders sit between the 50% and 51%
+    # cumulative marks — up to ~7% too high on the
+    # channel-count series. See README "Methodology notes".
     #
     # Used by:
     #   - calculate_coefficient (below, "Nakamoto")
@@ -352,9 +353,10 @@ class Coefficients:
         sorted_data = np.sort(data)[::-1]
         cumulative_share = np.cumsum(sorted_data) / total
 
-        # searchsorted finds the first index whose cumulative
-        # share reaches 0.51; +1 turns the index into a count
-        nodes_needed = np.searchsorted(cumulative_share, 0.51) + 1
+        # first index whose cumulative share EXCEEDS one half
+        # (side='right' skips exact-50% ties); +1 turns the
+        # index into a count
+        nodes_needed = int(np.searchsorted(cumulative_share, 0.5, side='right') + 1)
         return nodes_needed
 
 

@@ -6,11 +6,12 @@
 #  stubbed) and checks every derived field against the
 #  publicly known values: the double-sha256 display-order
 #  hash and the little-endian timestamp at header offset
-#  68. The expectedFailure test pins the timezone bug: the
-#  Time/Date columns are rendered with a bare
-#  datetime.fromtimestamp(), so the stored strings shift
-#  with the container's TZ instead of always being UTC (the
-#  test flips TZ to New York and asserts UTC anyway).
+#  68. Time/Date rendering is PINNED to Europe/Vilnius
+#  (DISPLAY_TZ in blockchain_blocks.py) — the deliberate
+#  convention of the whole dataset, see README "Methodology
+#  notes" — so the tests assert the Vilnius rendering and
+#  prove it holds no matter what the host TZ says (flipped
+#  to New York mid-test).
 #
 #  Used by:
 #    - runTests.sh (repo root) — "python3 -m unittest discover"
@@ -46,8 +47,9 @@ GENESIS_TIMESTAMP = 1231006505  # 2009-01-03 18:15:05 UTC
 # TestBlockImport
 ############################################################
 #
-#   test_genesis_block_fields   — hash + timestamp + UTC time
-#   test_time_is_utc_regardless_of_tz (expectedFailure)
+#   test_genesis_block_fields   — hash + timestamp + the
+#                                 pinned Vilnius rendering
+#   test_time_is_pinned_regardless_of_host_tz
 ############################################################
 
 class TestBlockImport(unittest.TestCase):
@@ -116,8 +118,8 @@ class TestBlockImport(unittest.TestCase):
     #
     # Proves: the header parse reproduces the publicly known
     # genesis facts — display-order double-sha256 hash and the
-    # little-endian timestamp — and (on this UTC container)
-    # renders 2009-01-03 18:15:05.
+    # little-endian timestamp — and renders the pinned
+    # Vilnius local time (18:15:05 UTC = 20:15:05 EET).
     ############################################################
 
     def test_genesis_block_fields(self):
@@ -128,7 +130,7 @@ class TestBlockImport(unittest.TestCase):
         self.assertEqual(height, 0)
         self.assertEqual(block_hash, GENESIS_HASH)
         self.assertEqual(timestamp, GENESIS_TIMESTAMP)
-        self.assertEqual(rendered_time, '2009-01-03 18:15:05')
+        self.assertEqual(rendered_time, '2009-01-03 20:15:05')
         self.assertEqual(rendered_date, '2009-01-03')
 
 
@@ -137,23 +139,22 @@ class TestBlockImport(unittest.TestCase):
 
 
     ############################################################
-    # test_time_is_utc_regardless_of_tz
+    # test_time_is_pinned_regardless_of_host_tz
     ############################################################
     #
-    # Proves (intended contract): the stored Time/Date must be
-    # UTC no matter where the container thinks it lives — the
-    # Timestamp column is UTC, so a TZ-dependent rendering
-    # makes the two columns disagree. Currently a New York TZ
-    # stores 13:15:05 for the genesis block.
+    # Proves: the stored Time/Date stay Europe/Vilnius no
+    # matter where the host thinks it lives — a New York TZ
+    # env used to make this store 13:15:05, silently shifting
+    # every Date boundary in the dataset with the deployment
+    # environment.
     ############################################################
 
-    @unittest.expectedFailure
-    def test_time_is_utc_regardless_of_tz(self):
+    def test_time_is_pinned_regardless_of_host_tz(self):
         os.environ['TZ'] = 'America/New_York'
         time.tzset()
         _, _, _, rendered_time, rendered_date = self.__import_genesis()
 
-        self.assertEqual(rendered_time, '2009-01-03 18:15:05')
+        self.assertEqual(rendered_time, '2009-01-03 20:15:05')
         self.assertEqual(rendered_date, '2009-01-03')
 
 

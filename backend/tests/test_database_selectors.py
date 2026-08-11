@@ -8,13 +8,13 @@
 #  wipes the data tables first, seeds its own fixture rows,
 #  and asserts the actual SQL semantics: the date-mask
 #  wildcard, the funding/spending activity window and its
-#  boundary, endpoint double-crediting, and the entity
-#  GROUP BY with its COALESCE fallback (fixed — a node
-#  without an entity row stands as its own entity). The one
-#  remaining expectedFailure demonstrates the
-#  average-vs-histogram population mismatch with live
-#  numbers instead of source text. Skips cleanly when no DB
-#  is reachable (plain unit-test runs).
+#  boundary, endpoint double-crediting, the entity GROUP BY
+#  with its COALESCE fallback (a node without an entity row
+#  stands as its own entity), the lifetime average and
+#  histogram sharing one channel population (proven with
+#  live numbers), and the prefix-restricted entity-name
+#  fixer sparing genuine hex-word aliases. Skips cleanly
+#  when no DB is reachable (plain unit-test runs).
 #
 #  Used by:
 #    - runTests.sh (repo root) — "python3 -m unittest
@@ -132,6 +132,10 @@ class DBFixture(unittest.TestCase):
 
     def seed_entity(self, node, name):
         self.__execute('INSERT INTO Lightning_Entities (NodeID, EntityName) VALUES (%s, %s)', (node, name))
+
+    def seed_alias(self, node, alias, last_seen='2024-01-01 00:00:00'):
+        self.__execute('INSERT INTO Lightning_NodeAliases (NodeID, Alias, firstSeen, lastSeen) VALUES (%s, %s, %s, %s)',
+                       (node, alias, last_seen, last_seen))
 
     def __execute(self, sql, params):
         with get_db_connection() as conn:
@@ -410,8 +414,8 @@ class TestEntityAggregation(DBFixture):
 ############################################################
 #
 #   test_histogram_population — WHERE semantics live
-#   test_average_matches_histogram_population
-#     (expectedFailure) — the mismatch with real numbers
+#   test_average_matches_histogram_population — one
+#     population for both statistics, proven with numbers
 ############################################################
 
 class TestLifetimePopulations(DBFixture):
@@ -471,18 +475,75 @@ class TestLifetimePopulations(DBFixture):
     # test_average_matches_histogram_population
     ############################################################
     #
-    # Proves (intended contract): the published average must
-    # describe the SAME channels as the published histogram —
-    # mean lifetime 100 blocks here. The average's WHERE lacks
-    # the same-block filter, so the zero-lifetime row drags it
-    # to 66.67 while the histogram says 100.
+    # Proves: the published average describes the SAME
+    # channels as the published histogram — the same-block
+    # close is excluded from both, so the mean is exactly 100
+    # blocks (that zero-lifetime row used to drag the
+    # unfiltered average to 66.67).
     ############################################################
 
-    @unittest.expectedFailure
     def test_average_matches_histogram_population(self):
         self.__seed_lifetimes()
         average = GeneralStats().calculate_channel_lifetime_average()
         self.assertAlmostEqual(float(average), 100.0, places=4)
+
+
+
+
+
+
+
+
+############################################################
+# TestEntityNameFixer
+############################################################
+#
+#   test_placeholder_renamed_genuine_hex_survives — the
+#     prefix-restricted matcher on real SQL: a NodeID-prefix
+#     placeholder gets the freshest alias, a genuine
+#     hex-word name keeps it even when an older non-hex
+#     alias exists
+############################################################
+
+class TestEntityNameFixer(DBFixture):
+
+
+
+
+
+
+    ############################################################
+    # test_placeholder_renamed_genuine_hex_survives
+    ############################################################
+    #
+    # Proves: only true placeholders — empty names or the
+    # exact 20-char NodeID prefix — enter the rename loop. A
+    # node whose real, newest alias merely spells a hex word
+    # ("decade") keeps that name even though an older non-hex
+    # alias ("OldNodeName") would be available to swap in.
+    ############################################################
+
+    def test_placeholder_renamed_genuine_hex_survives(self):
+        from blnstats.data_transform.entity_clusters import EntityClusters
+
+        placeholder_node = 'aa' * 33
+        self.seed_entity(placeholder_node, placeholder_node[:20])
+        self.seed_alias(placeholder_node, 'ACINQ')
+
+        hexword_node = 'bb' * 33
+        self.seed_entity(hexword_node, 'decade')
+        self.seed_alias(hexword_node, 'decade', last_seen='2024-06-01 00:00:00')
+        self.seed_alias(hexword_node, 'OldNodeName', last_seen='2020-01-01 00:00:00')
+
+        EntityClusters().fix_entity_hex_names_if_possible()
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute('SELECT NodeID, EntityName FROM Lightning_Entities')
+                names = dict(cursor.fetchall())
+
+        self.assertEqual(names[placeholder_node], 'ACINQ')
+        self.assertEqual(names[hexword_node], 'decade')
 
 
 

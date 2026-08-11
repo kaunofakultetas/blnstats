@@ -282,11 +282,10 @@ class GeneralStats:
     # (/144). Returns the same float it writes into the
     # JSON (0 on an empty table).
     #
-    # NOTE (inconsistency, documented not fixed): this
-    # WHERE lacks the histogram query's
-    # "Spending > Funding OR sentinel" condition, so
-    # same-block and inverted funding/spending rows count
-    # here but not in the histogram. Debug print of the
+    # The WHERE matches the histogram query's exactly
+    # (same-block closes and inverted rows excluded), so
+    # both published lifetime statistics always describe
+    # the SAME channel population. Debug print of the
     # average left in.
     #
     # Used by:
@@ -308,13 +307,14 @@ class GeneralStats:
                                     BT.SpendingBlockIndex - BT.FundingBlockIndex
                             END
                         ) AS AverageChannelLifetime
-                    FROM 
+                    FROM
                         Lightning_Channels LC
                     LEFT JOIN Blockchain_Transactions BT
                         ON LC.ShortChannelID = BT.ShortChannelID
                     WHERE
-                        BT.FundingBlockIndex IS NOT NULL AND 
-                        BT.SpendingBlockIndex IS NOT NULL
+                        BT.FundingBlockIndex IS NOT NULL AND
+                        BT.SpendingBlockIndex IS NOT NULL AND
+                        (BT.SpendingBlockIndex > BT.FundingBlockIndex OR BT.SpendingBlockIndex = 999999999)
                 '''
                 db_cursor.execute(query)
                 result = db_cursor.fetchone()

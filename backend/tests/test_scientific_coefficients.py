@@ -519,16 +519,13 @@ class TestDispatcherAndSeries(unittest.TestCase):
 # TestKnownMetricBugs
 ############################################################
 #
-# Each test asserts the CORRECT scientific behavior. The
-# top-10% cases are FIXED (never-empty decile + zero-total
-# guard, values for n >= 10 unchanged) and now guard
-# against regression. The Nakamoto cutoff stays pinned
-# under @unittest.expectedFailure — fixing it changes
-# published series, so the fix must be acknowledged by
-# removing the decorator.
+# Each test asserts the CORRECT scientific behavior — all
+# four former bug pins are FIXED and guard against
+# regression: the Nakamoto strict->50% definition (the
+# 2026-08-11 correction, see README "Methodology notes")
+# and the top-10% never-empty decile + zero-total guard.
 #
-#   test_nakamoto_between_50_and_51_percent — 0.51 cutoff
-#     (expectedFailure, pending review)
+#   test_nakamoto_between_50_and_51_percent     — fixed
 #   test_top10_small_network_controls_something — fixed
 #   test_top10_sum_small_network                — fixed
 #   test_top10_all_zero_is_zero                 — fixed
@@ -564,11 +561,10 @@ class TestKnownMetricBugs(unittest.TestCase):
     ############################################################
     #
     # Proves (textbook): a holder with 50.5% of capacity IS a
-    # majority — Nakamoto must be 1. The 0.51 cutoff answers 2
-    # for any top share in (50%, 51%), overcounting by one.
+    # majority — Nakamoto is 1. The pre-correction 0.51
+    # cutoff answered 2 for any top share in (50%, 51%).
     ############################################################
 
-    @unittest.expectedFailure
     def test_nakamoto_between_50_and_51_percent(self):
         self.assertEqual(self.c.calculate_nakamoto([505, 495]), 1)
 

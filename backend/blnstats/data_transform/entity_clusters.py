@@ -253,13 +253,14 @@ class EntityClusters:
     # fix_entity_hex_names_if_possible
     ############################################################
     #
-    # Replaces placeholder EntityNames (pure-hex strings or
-    # empty) with the node's most recent non-hex alias, when
-    # one exists. The matcher is greedy: ANY name made only
-    # of hex characters counts as a placeholder, so a
-    # legitimate all-hex alias (e.g. "decade") is treated as
-    # one too. Runs one SELECT per hex-named entity (N+1) —
-    # acceptable at current table sizes.
+    # Replaces placeholder EntityNames with the node's most
+    # recent non-hex alias, when one exists. A placeholder
+    # is ONLY an empty name or the exact 20-char NodeID
+    # prefix import_new_entities_to_main_table plants — a
+    # genuine alias that merely spells a hex word ("cafe",
+    # "decade") is a real name and survives. Runs one
+    # SELECT per placeholder entity (N+1) — acceptable at
+    # current table sizes.
     #
     # Used by:
     #   - importLNDDBReader (blnstats/__init__.py)
@@ -271,14 +272,17 @@ class EntityClusters:
             with db_conn.cursor() as db_cursor:
 
 
-                # STEP 1: collect entities still wearing hex names
-                # ================================================
+                # STEP 1: collect entities still wearing
+                # placeholder names — empty, or exactly the
+                # 20-char prefix of their own NodeID
+                # ===========================================
                 logger.info('Fetching entities with hex string names')
                 fetch_query = '''
                     SELECT NodeID, EntityName
                     FROM Lightning_Entities
-                    WHERE 
-                        EntityName REGEXP '^[0-9a-fA-F]+$' OR EntityName = ""
+                    WHERE
+                        EntityName = ""
+                        OR (CHAR_LENGTH(EntityName) = 20 AND NodeID LIKE CONCAT(EntityName, '%'))
                 '''
                 db_cursor.execute(fetch_query)
                 hex_entities = db_cursor.fetchall()

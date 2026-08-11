@@ -5,11 +5,12 @@
 #  via db_fakes: NodeMetrics.transformForBlockHeight's
 #  capacity/channel-count merge (missing side defaults to
 #  0) and EntityClusters.fix_entity_hex_names_if_possible's
-#  placeholder-name replacement. The expectedFailure test
-#  pins the greedy hex matcher: an entity whose REAL alias
-#  happens to be all hex characters ("decade", "cafe",
-#  "beef" — all valid names) is treated as a placeholder
-#  and silently renamed to an older alias.
+#  placeholder-name replacement, now prefix-restricted:
+#  only empty names and exact 20-char NodeID prefixes count
+#  as placeholders, so a genuine hex-word alias ("decade",
+#  "cafe") can never be renamed. The SQL-shape guard lives
+#  here (the fakes replay rows regardless of the WHERE);
+#  the behavioral proof runs in test_database_selectors.py.
 #
 #  Used by:
 #    - runTests.sh (repo root) — "python3 -m unittest discover"
@@ -100,8 +101,8 @@ class TestNodeMetricsMerge(unittest.TestCase):
 #   test_placeholder_replaced   — 20-hex NodeID prefix gets
 #     the freshest non-hex alias
 #   test_no_alias_no_update     — nothing usable -> no UPDATE
-#   test_real_hex_alias_survives (expectedFailure) — the
-#     greedy matcher renames genuine hex-word aliases
+#   test_fetch_query_is_prefix_restricted — genuine hex-word
+#     aliases can never enter the rename loop
 ############################################################
 
 class TestEntityHexNameFixer(unittest.TestCase):
@@ -178,26 +179,28 @@ class TestEntityHexNameFixer(unittest.TestCase):
 
 
     ############################################################
-    # test_real_hex_alias_survives
+    # test_fetch_query_is_prefix_restricted
     ############################################################
     #
-    # Proves (intended contract): an entity named by a GENUINE
-    # alias that merely spells a hex word ("decade" — 6 chars,
-    # clearly not a 20-char NodeID prefix) must keep that
-    # name. The matcher's REGEXP '^[0-9a-fA-F]+$' treats any
-    # hex-only string as a placeholder, so the node's newest
-    # alias is silently replaced by an OLDER non-hex one —
-    # rewriting entity identity in the published entity
-    # metrics.
+    # Proves: the placeholder SELECT only matches empty names
+    # or the exact 20-char NodeID prefix — a genuine hex-word
+    # alias ("decade", "cafe") can never enter the rename
+    # loop. Asserted on the query TEXT because the fakes
+    # replay rows regardless of the WHERE; the behavioral
+    # proof against real SQL lives in
+    # test_database_selectors.py.
     ############################################################
 
-    @unittest.expectedFailure
-    def test_real_hex_alias_survives(self):
-        script = [
-            [('node1', 'decade')],  # the node's real, current alias
-            ('OldNodeName',),       # an older non-hex alias
-        ]
-        self.assertEqual(self.__run_fixer(script), [])
+    def test_fetch_query_is_prefix_restricted(self):
+        executed = []
+        clusters = object.__new__(EntityClusters)
+        with patch.object(ec_module, 'get_db_connection', lambda: FakeConn([[]], executed)):
+            clusters.fix_entity_hex_names_if_possible()
+
+        fetch_sql = executed[0][0]
+        self.assertIn('CHAR_LENGTH(EntityName) = 20', fetch_sql)
+        self.assertIn("NodeID LIKE CONCAT(EntityName, '%')", fetch_sql)
+        self.assertNotIn('EntityName REGEXP', fetch_sql)
 
 
 

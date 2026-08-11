@@ -34,6 +34,15 @@ import time
 from multiprocessing.dummy import Pool as ThreadPool
 from ..database.utils import get_db_connection
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+# The Time/Date columns are rendered in THIS zone, pinned so
+# the dataset never shifts with the host's TZ setting. The
+# whole 2018+ history and every published monthly snapshot
+# use Vilnius day boundaries — see README "Methodology
+# notes" before ever changing this (a UTC switch re-selects
+# nearly every monthly first block).
+DISPLAY_TZ = ZoneInfo('Europe/Vilnius')
 from dataclasses import dataclass
 from typing import List, Dict
 
@@ -215,9 +224,11 @@ def get_block_hash_from_header(header_hex: str) -> str:
 # (height, success, error_message) so the pool result set is
 # uniform and sync_blocks can retry just the failures.
 #
-# GOTCHA: datetime.fromtimestamp() converts the UTC block
-# timestamp using the SERVER-LOCAL timezone — the Time and
-# Date columns shift with the container's TZ setting.
+# Time/Date are rendered in the pinned Europe/Vilnius zone
+# (DISPLAY_TZ above) — host-TZ-independent and consistent
+# with the entire existing dataset. The Timestamp column
+# stays the raw UTC UNIX time, so a UTC view is always one
+# FROM_UNIXTIME away.
 #
 # Used by:
 #   - BlockchainBlocks.sync_blocks (below) — pool.map over
@@ -247,8 +258,9 @@ def retrieve_and_write_blockchain_block(args):
         header_bytes = bytes.fromhex(raw_header)
         timestamp = int.from_bytes(header_bytes[68:72], 'little')
 
-        # server-local TZ conversion — see the GOTCHA in the banner
-        dt_object = datetime.fromtimestamp(timestamp)
+        # pinned Europe/Vilnius rendering — see DISPLAY_TZ and
+        # the banner note
+        dt_object = datetime.fromtimestamp(timestamp, tz=DISPLAY_TZ)
         human_readable_time = dt_object.strftime('%Y-%m-%d %H:%M:%S')
         human_readable_date = human_readable_time.split()[0]
 

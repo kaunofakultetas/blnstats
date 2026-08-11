@@ -7,14 +7,13 @@
 #  /DATA/GENERATED/General_Stats/Channel_Lifetime/ path
 #  (created inside the throwaway test container). Regular
 #  tests pin the blocks->days bucketing (144 blocks/day,
-#  floor) and the JSON payloads. The float-return contract
-#  and the odd-endpoint-sum invariant (half a channel is
-#  physically impossible — an odd sum means incomplete
-#  data and raises a diagnostic error) are FIXED and now
-#  guard against regression; the one remaining
-#  expectedFailure pins the average query's WHERE missing
-#  the histogram's same-block/inverted-row filter — a
-#  published-population decision still pending review.
+#  floor) and the JSON payloads. All former pins here are
+#  FIXED and guard against regression: the float-return
+#  contract, the odd-endpoint-sum invariant (half a channel
+#  is physically impossible — an odd sum means incomplete
+#  data and raises a diagnostic error), and the average
+#  query's WHERE now matching the histogram's exactly so
+#  both statistics describe one channel population.
 #
 #  Used by:
 #    - runTests.sh (repo root) — "python3 -m unittest discover"
@@ -121,8 +120,8 @@ class TestLifetimePlot(unittest.TestCase):
 #
 # The found contracts, asserted correct-side-up.
 #
-#   test_average_and_histogram_filters_match (expectedFailure
-#     — pending the published-population decision)
+#   test_average_and_histogram_filters_match — one WHERE
+#     for both lifetime statistics
 #   test_average_returns_float               — fixed
 #   test_odd_endpoint_sum_raises             — the whole-
 #     channel invariant, enforced with a clear error
@@ -139,17 +138,13 @@ class TestLifetimeContracts(unittest.TestCase):
     # test_average_and_histogram_filters_match
     ############################################################
     #
-    # Proves (intended contract): the average and the
-    # histogram must describe the SAME channel population. The
-    # histogram's WHERE drops same-block closes and inverted
-    # funding/spending rows ("SpendingBlockIndex >
-    # FundingBlockIndex OR sentinel"); the average query
-    # lacks that condition, so those rows count in one
-    # statistic but not the other. Checked textually against
-    # the method source — the SQL itself needs a DB to run.
+    # Proves: the average and the histogram describe the SAME
+    # channel population — both WHEREs carry the same-block/
+    # inverted-row filter. Checked textually against the
+    # method source; the behavioral proof with live numbers
+    # runs in test_database_selectors.py.
     ############################################################
 
-    @unittest.expectedFailure
     def test_average_and_histogram_filters_match(self):
         avg_src = inspect.getsource(GeneralStats.calculate_channel_lifetime_average)
         self.assertIn('SpendingBlockIndex > BT.FundingBlockIndex', avg_src)
