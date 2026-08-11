@@ -10,11 +10,10 @@
 #  division error); negative values must raise ValueError.
 #
 #  Used by:
-#    - backend/runTests.sh — "python3 -m unittest discover"
-#      pinned to exactly this file (the discover-everything
-#      pattern is commented out there). pytest is installed
-#      in the backend image but nothing invokes it, and no
-#      CI hook runs this suite automatically.
+#    - runTests.sh (repo root) — "python3 -m unittest discover"
+#      over tests/test_*.py. pytest is installed in the
+#      backend image but nothing invokes it, and no CI hook
+#      runs this suite automatically.
 ############################################################
 
 

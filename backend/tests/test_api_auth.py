@@ -13,7 +13,7 @@
 #  keep the suite fast.
 #
 #  Used by:
-#    - backend/runTests.sh — "python3 -m unittest discover"
+#    - runTests.sh (repo root) — "python3 -m unittest discover"
 #      over tests/test_*.py
 ############################################################
 
