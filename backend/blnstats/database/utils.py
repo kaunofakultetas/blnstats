@@ -263,3 +263,33 @@ def create_tables_if_not_exists():
             conn.commit()
 
 
+
+
+
+
+
+
+############################################################
+# get_setting
+############################################################
+#
+# One System_Settings value by key, with a caller-supplied
+# default when the key is absent. Values are stored and
+# returned as strings; a DB error raises like everywhere
+# else — only a MISSING key falls back to the default.
+#
+# Used by:
+#   - workflows.py — lnd_dbreader_full_update_flow and
+#     full_initialization_flow resolve the DBReader dump
+#     URL ('LND-DBReader-Source-1') through this
+#   - tests/test_database_selectors.py
+############################################################
+
+def get_setting(key, default=None):
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute('SELECT `Value` FROM System_Settings WHERE `Key` = %s', [key])
+            row = cursor.fetchone()
+            return row[0] if row else default
+
+

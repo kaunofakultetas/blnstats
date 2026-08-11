@@ -11,6 +11,10 @@
 //  it has one; a deployments failure only costs that label.
 //  A failed poll leaves the last good tree on screen.
 //
+//  Above the tabs: QuickActions (trigger shortcuts) and the
+//  DataSourceSettings card (edits the DBReader dump URL the
+//  import flows read).
+//
 //  Split into (root component last):
 //
 //    calculateDuration      — start/end → "2m", "1.5h", ...
@@ -38,6 +42,7 @@ import {
 import PageTitle from '@/components/PageTitle/PageTitle';
 import PageLoading from '@/components/PageLoading/PageLoading';
 import QuickActions from './components/QuickActions';
+import DataSourceSettings from './components/DataSourceSettings';
 import ActiveWorkflows from './components/ActiveWorkflows';
 import WorkflowTemplates from './components/WorkflowTemplates';
 
@@ -353,6 +358,8 @@ export default function FlowsDashboard() {
           triggerWorkflow={triggerWorkflow}
           deploymentNames={prefectDeployments.map(d => d.name)}
         />
+
+        <DataSourceSettings />
 
         <Paper className="flex-1">
           <Tabs value={activeTab} onChange={handleTabChange} className="border-b">

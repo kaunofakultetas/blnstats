@@ -21,7 +21,18 @@
 
 
 from prefect import flow, task, serve
+from prefect.schedules import Cron
 import blnstats
+from blnstats.database.utils import get_setting
+
+
+# The System_Settings key the admin UI's Data Source card
+# edits; both DBReader-importing flows resolve their dump URL
+# through it. The literal below is only the fallback for an
+# unseeded table — database/utils.py and mysql/init.sql seed
+# the same value.
+DBREADER_SOURCE_KEY = 'LND-DBReader-Source-1'
+DBREADER_SOURCE_FALLBACK = 'https://blnstats.knf.vu.lt/rawdata/INPUT/lnd-dbreader-A336EEAB--latest.json.gz'
 
 
 
@@ -487,15 +498,12 @@ def lightning_network_statistics_flow():
 @flow
 def lnd_dbreader_full_update_flow(file_path=None):
 
-    # With no explicit path, pull the always-current dump from
-    # the host at Vilnius University Kaunas faculty that
-    # publishes it — 172.16.2.6 is a private address, so the
-    # default only works from inside that network (the public
-    # mirror of the same dump is https://blnstats.knf.vu.lt/
-    # rawdata/INPUT/lnd-dbreader-A336EEAB--latest.json.gz,
-    # which full_initialization_flow uses instead).
+    # With no explicit path, the dump URL comes from
+    # System_Settings — editable in the admin UI's Data Source
+    # card — with the public mirror as the code fallback for
+    # an unseeded table.
     if(file_path == None):
-        file_path = "https://blnstats.knf.vu.lt/rawdata/INPUT/lnd-dbreader-A336EEAB--latest.json.gz"
+        file_path = get_setting(DBREADER_SOURCE_KEY, DBREADER_SOURCE_FALLBACK)
     lnd_dbreader_import_result = import_lnd_dbreader_data(file_path)
 
 
@@ -522,12 +530,9 @@ def lnd_dbreader_full_update_flow(file_path=None):
 #
 # Cold-start pipeline for an empty database: both source
 # imports, then the full analysis (which itself begins with
-# the blockchain sync). BROKEN at its first step for as long
-# as import_ln_research_data raises ImportError (see that
-# task's banner). Note the source asymmetry: this flow
-# hardcodes the public mirror URL for the DBReader dump,
-# while lnd_dbreader_full_update_flow defaults to the
-# internal 172.16.2.6 host.
+# the blockchain sync). The DBReader dump URL comes from the
+# same System_Settings key the update flow uses, so the
+# admin-set source applies to both.
 #
 # Used by:
 #   - served below as deployment "Full Initialization Flow"
@@ -536,16 +541,16 @@ def lnd_dbreader_full_update_flow(file_path=None):
 
 @flow
 def full_initialization_flow():
-    # STEP 1: LNResearch gossip archive — currently dies
-    # with ImportError inside blnstats.importLNResearchData
-    # =====================================================
+    # STEP 1: LNResearch gossip archive
+    # =================================
     ln_research_import_result = import_ln_research_data()
 
 
-    # STEP 2: LND DBReader dump — from the public mirror,
-    # not the internal host the update flow defaults to
-    # ===================================================
-    lnd_dbreader_import_result = import_lnd_dbreader_data("https://blnstats.knf.vu.lt/rawdata/INPUT/lnd-dbreader-A336EEAB--latest.json.gz")
+    # STEP 2: LND DBReader dump — settings-driven, same
+    # source the update flow resolves
+    # =================================================
+    lnd_dbreader_import_result = import_lnd_dbreader_data(
+        get_setting(DBREADER_SOURCE_KEY, DBREADER_SOURCE_FALLBACK))
 
 
     # STEP 3: recalculate everything as a subflow
@@ -577,6 +582,15 @@ def full_initialization_flow():
 # admin UI triggers runs by these exact strings, so renaming
 # one here silently disables its dashboard button.
 #
+# The DBReader update flow also carries the ONLY schedule:
+# monthly, the 1st at 04:00 Europe/Vilnius (the dataset's
+# pinned zone) — right after the monthly snapshot boundary
+# every chart is keyed to, so the data can no longer
+# silently go stale (the 2026-08 audit found a six-week gap
+# nobody noticed). The other two deployments stay
+# manual-trigger. The Data Source card in the admin UI
+# states this schedule — keep the two in sync.
+#
 # Used by:
 #   - blnstats-prefect-worker (docker-compose.yml) —
 #     command: python3 -u workflows.py
@@ -584,7 +598,10 @@ def full_initialization_flow():
 
 if __name__ == "__main__":
     ln_stats_deployment = lightning_network_statistics_flow.to_deployment(name="BLN Analysis Flow")
-    full_lnd_dbreader_update_deployment = lnd_dbreader_full_update_flow.to_deployment(name="LND DBReader Full Update Flow")
+    full_lnd_dbreader_update_deployment = lnd_dbreader_full_update_flow.to_deployment(
+        name="LND DBReader Full Update Flow",
+        schedules=[Cron("0 4 1 * *", timezone="Europe/Vilnius")],
+    )
     full_pipeline_deployment = full_initialization_flow.to_deployment(name="Full Initialization Flow")
 
     serve(

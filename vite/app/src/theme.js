@@ -1,7 +1,5 @@
 // -----------------------------------------------------------
-//  [*] MUI theme — light and dark color schemes
-//
-//  One theme per scheme; providers.jsx owns which one is live.
+//  [*] MUI theme — the single light scheme
 //
 //  Palette notes:
 //    - primary.main is the brand burgundy #7B003F, mirrored in
@@ -15,16 +13,18 @@
 //      into SVG attributes, where a var(--mui-*) reference
 //      would not resolve.
 //
-//  Dark mode is fully defined but unreachable: no theme
-//  switcher is mounted. The /login page renders OUTSIDE the
-//  ThemeProvider (App.jsx) and keeps its hardcoded colors.
+//  There is no dark mode by decision (2026-08-11) — the app
+//  always runs this one light theme, the same approach as the
+//  control-frontend sibling project. The /login page renders
+//  OUTSIDE the ThemeProvider (App.jsx) and keeps its own
+//  hardcoded colors.
 //
 //  Used by:
-//    - providers.jsx — rebuilt whenever the mode changes
+//    - providers.jsx — passed to the ThemeProvider once
 // -----------------------------------------------------------
 
 import { createTheme } from '@mui/material/styles';
-import { green, grey, purple } from '@mui/material/colors';
+import { grey } from '@mui/material/colors';
 
 
 // Keep in sync with the body rule in globals.css. MUI otherwise
@@ -33,40 +33,24 @@ import { green, grey, purple } from '@mui/material/colors';
 const FONT_STACK = "'Inter', Arial, Helvetica, sans-serif";
 
 
-const getTheme = (mode) => createTheme({
+const theme = createTheme({
   typography: {
     fontFamily: FONT_STACK,
   },
 
   palette: {
-    mode,
-    ...(mode === 'light' ? {
-        primary: {
-          main: '#7b003f',
-          accent: '#E64164'
-        },
-        secondary: {
-          main: grey[50]
-        },
-        background: {
-          default: '#f5f5f5',
-          paper: '#ffffff'
-        },
-      } : {
-        primary: {
-          main: '#ffffff',
-          accent: green[500]
-        },
-        secondary: {
-          main: purple[300]
-        },
-        background: {
-          default: '#121212',
-          paper: '#121212'
-        }
-      }
-    ),
+    primary: {
+      main: '#7b003f',
+      accent: '#E64164'
+    },
+    secondary: {
+      main: grey[50]
+    },
+    background: {
+      default: '#f5f5f5',
+      paper: '#ffffff'
+    },
   }
 });
 
-export default getTheme;
+export default theme;

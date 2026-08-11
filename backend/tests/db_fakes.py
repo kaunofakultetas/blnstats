@@ -26,14 +26,20 @@
 ############################################################
 
 class FakeCursor:
-    def __init__(self, script, executed):
+    def __init__(self, script, executed, rowcounts=None):
         self.script = script
         self.executed = executed
+        self.rowcounts = rowcounts
         self.result = []
+        self.rowcount = 1
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
         self.result = self.script.pop(0) if self.script else []
+        # rowcounts (shared, popped per execute) lets tests drive
+        # INSERT IGNORE-style outcomes; default stays 1
+        if self.rowcounts:
+            self.rowcount = self.rowcounts.pop(0)
 
     def executemany(self, sql, rows):
         self.executed.append((sql, list(rows)))
@@ -71,12 +77,13 @@ class FakeCursor:
 ############################################################
 
 class FakeConn:
-    def __init__(self, script, executed):
+    def __init__(self, script, executed, rowcounts=None):
         self.script = script
         self.executed = executed
+        self.rowcounts = rowcounts
 
     def cursor(self, **kwargs):
-        return FakeCursor(self.script, self.executed)
+        return FakeCursor(self.script, self.executed, self.rowcounts)
 
     def commit(self):
         pass

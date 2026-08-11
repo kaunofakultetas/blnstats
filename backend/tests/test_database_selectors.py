@@ -27,7 +27,7 @@ import unittest
 import json
 from unittest import skipUnless
 
-from blnstats.database.utils import get_db_connection, create_tables_if_not_exists
+from blnstats.database.utils import get_db_connection, create_tables_if_not_exists, get_setting
 from blnstats.database.raw_data_selector import RawDataSelector
 from blnstats.database.entity_metrics_selector import EntityMetricsSelector
 from blnstats.calculations.general_stats import GeneralStats
@@ -636,6 +636,73 @@ class TestEntityNameFixer(DBFixture):
 
         self.assertEqual(names[placeholder_node], 'ACINQ')
         self.assertEqual(names[hexword_node], 'decade')
+
+
+
+
+
+
+
+
+############################################################
+# TestGetSetting
+############################################################
+#
+#   test_reads_value_and_default — an existing key returns
+#     its stored string; a missing key returns the default
+############################################################
+
+class TestGetSetting(DBFixture):
+
+
+
+
+
+
+    ############################################################
+    # test_reads_value_and_default
+    ############################################################
+    #
+    # Proves: get_setting returns the stored value for a key
+    # the settings API (or init seed) wrote, and the
+    # caller's default only when the key is absent — the
+    # contract the DBReader flows depend on.
+    ############################################################
+
+    def test_reads_value_and_default(self):
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute('INSERT INTO System_Settings (`Key`, `Value`) VALUES (%s, %s) '
+                               'ON DUPLICATE KEY UPDATE `Value` = VALUES(`Value`)',
+                               ('LND-DBReader-Source-1', 'http://example.test/dump.json.gz'))
+            conn.commit()
+
+        self.assertEqual(get_setting('LND-DBReader-Source-1'), 'http://example.test/dump.json.gz')
+        self.assertEqual(get_setting('no-such-key', 'fallback'), 'fallback')
+        self.assertIsNone(get_setting('no-such-key'))
+
+
+
+
+
+
+    ############################################################
+    # setUp
+    ############################################################
+    #
+    # Wipe System_Settings too — the base fixture leaves the
+    # admin tables alone, but these tests own that table.
+    #
+    # Used by:
+    #   - the unittest runner, before every test method
+    ############################################################
+
+    def setUp(self):
+        super().setUp()
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute('DELETE FROM System_Settings')
+            conn.commit()
 
 
 

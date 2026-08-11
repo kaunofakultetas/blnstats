@@ -18,6 +18,7 @@
 #    GET  /api/admin/administrators — admin account list
 #    POST /api/admin/administrators — add/edit/delete admin
 #    GET  /api/settings             — System_Settings dump
+#    POST /api/settings             — System_Settings upsert
 ############################################################
 
 

@@ -145,15 +145,16 @@ def checkauth_HTTPGET():
 # POST /api/admin/administrators
 #
 # GET returns all System_Users rows as one JSON array built
-# by MySQL (JSON_ARRAYAGG); POST multiplexes insert/update
-# and delete through the `action` field, with an empty `id`
-# meaning insert. Gotchas: an empty table makes
-# JSON_ARRAYAGG return NULL, so json.loads(None) raises on
-# GET; the 'at least 8 characters' error message only
-# actually checks for an EMPTY password; inserts use INSERT
-# IGNORE, so a duplicate email silently answers 'ok'; new
-# rows get LastSeen = '' (never NULL); and the bcrypt hash
-# is computed even when the password is empty or unused.
+# by MySQL (JSON_ARRAYAGG); an empty table comes back as []
+# (JSON_ARRAYAGG yields NULL, coerced before json.loads).
+# POST multiplexes insert/update and delete through the
+# `action` field, with an empty `id` meaning insert. New
+# accounts require a password of at least 8 characters, and
+# a duplicate email answers {type:'error'} with a reason
+# (detected via rowcount after the INSERT IGNORE) instead
+# of a false 'ok'. Gotchas that remain: new rows get
+# LastSeen = '' (never NULL), and the bcrypt hash is
+# computed even when the password ends up unused.
 #
 # Used by:
 #   - AdministratorsListTable.jsx (vite/app/src/systemPages
@@ -184,7 +185,9 @@ def usersList_HTTP():
                         System_Users
                 ''')
                 result = cursor.fetchone()[0]
-                users_data = json.loads(result)
+                # JSON_ARRAYAGG over zero rows yields NULL — an
+                # empty account list is [], not a crash
+                users_data = json.loads(result) if result else []
                 return Response(json.dumps(users_data, indent=4), mimetype='application/json')
             elif request.method == "POST":
                 postData = request.get_json()
@@ -193,12 +196,17 @@ def usersList_HTTP():
                     passwordHash = bcrypt.hashpw(postData['password'].encode('utf-8'), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
                     if(postData['id'] == ''):
-                        # message promises 8 chars but the check only rejects an empty password
-                        if(len(postData['password']) == 0):
+                        # the check now enforces what the message promises
+                        if(len(postData['password']) < 8):
                             cursor.close()
                             return Response(json.dumps({'type': 'error', 'reason': 'Password must be at least 8 characters long'}), mimetype='application/json')
                         cursor.execute(' INSERT IGNORE INTO System_Users (Email, Password, Admin, Enabled, LastSeen) VALUES (%s,%s,%s,%s,%s) ',
                                         [ postData['email'], passwordHash, postData['admin'], postData['enabled'], '' ])
+                        # INSERT IGNORE swallows the duplicate-key error —
+                        # rowcount 0 is how a taken email shows itself
+                        if(cursor.rowcount == 0):
+                            cursor.close()
+                            return Response(json.dumps({'type': 'error', 'reason': 'An account with this email already exists'}), mimetype='application/json')
                     else:
                         # empty password on update means "keep the current one"
                         if(len(postData['password']) != 0):
