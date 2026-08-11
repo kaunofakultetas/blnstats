@@ -293,3 +293,34 @@ def get_setting(key, default=None):
             return row[0] if row else default
 
 
+
+
+
+
+
+
+############################################################
+# set_setting
+############################################################
+#
+# Upserts one System_Settings value — the same ON DUPLICATE
+# KEY statement the settings API uses, for backend-side
+# writers. Values are stored as strings; the caller passes
+# them as such.
+#
+# Used by:
+#   - workflows.py — full_initialization_flow marks
+#     InitialSyncCompleted = '1' on success
+#   - tests/test_database_selectors.py
+############################################################
+
+def set_setting(key, value):
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                INSERT INTO System_Settings (`Key`, `Value`) VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE `Value` = VALUES(`Value`)
+            ''', [key, str(value)])
+        conn.commit()
+
+

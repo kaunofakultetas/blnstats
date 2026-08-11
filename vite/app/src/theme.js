@@ -14,8 +14,7 @@
 //      would not resolve.
 //
 //  There is no dark mode by decision (2026-08-11) — the app
-//  always runs this one light theme, the same approach as the
-//  control-frontend sibling project. The /login page renders
+//  always runs this one light theme. The /login page renders
 //  OUTSIDE the ThemeProvider (App.jsx) and keeps its own
 //  hardcoded colors.
 //

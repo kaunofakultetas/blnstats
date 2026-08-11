@@ -5,15 +5,19 @@
 //  /prefect/api/* to the Prefect server behind a session
 //  check, so these are same-origin cookie requests.
 //
-//  Deployments are fetched once and double as the Templates
-//  tab. The run tree polls every 10 s and waits on them,
-//  because a run is labelled with its deployment's name when
-//  it has one; a deployments failure only costs that label.
-//  A failed poll leaves the last good tree on screen.
+//  Deployments are fetched once — they gate the launch
+//  buttons and label the runs. The run tree polls every 10 s
+//  and waits on them, because a run is labelled with its
+//  deployment's name when it has one; a deployments failure
+//  only costs that label. A failed poll leaves the last good
+//  tree on screen. System settings ride along too:
+//  InitialSyncCompleted greys out the one-time full-
+//  initialization button (the LNResearch archive imports
+//  once; refreshes come from the DBReader update flow).
 //
-//  Above the tabs: QuickActions (trigger shortcuts) and the
-//  DataSourceSettings card (edits the DBReader dump URL the
-//  import flows read).
+//  Above the runs panel: QuickActions (the two launch
+//  buttons) and the DataSourceSettings card (edits the
+//  DBReader dump URL the import flows read).
 //
 //  Split into (root component last):
 //
@@ -27,7 +31,6 @@
 //    - Flows.jsx — the /admin page body
 // -----------------------------------------------------------
 
-import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from "axios";
 import toast from 'react-hot-toast';
@@ -35,8 +38,7 @@ import {
   Alert,
   Box,
   Paper,
-  Tab,
-  Tabs
+  Typography
 } from '@mui/material';
 
 import PageTitle from '@/components/PageTitle/PageTitle';
@@ -44,7 +46,6 @@ import PageLoading from '@/components/PageLoading/PageLoading';
 import QuickActions from './components/QuickActions';
 import DataSourceSettings from './components/DataSourceSettings';
 import ActiveWorkflows from './components/ActiveWorkflows';
-import WorkflowTemplates from './components/WorkflowTemplates';
 
 
 // Every Prefect filter endpoint is a POST with a JSON body;
@@ -255,9 +256,11 @@ const fetchFlowRuns = async (deployments) => {
 // FlowsDashboard (default export)
 // -----------------------------------------------------------
 //
-// Deployments (fetched once) feed the shortcut buttons and
-// Templates; the 10 s run poll fills Active Workflows; a
+// Deployments (fetched once) gate the launch buttons and
+// label the runs; the 10 s run poll fills the runs panel; a
 // trigger toasts, then refreshes once Prefect registers it.
+// The settings query greys the one-time full-init button
+// after its first successful run.
 //
 // Used by:
 //   - Flows.jsx — the /admin page body
@@ -265,7 +268,6 @@ const fetchFlowRuns = async (deployments) => {
 
 export default function FlowsDashboard() {
 
-  const [activeTab, setActiveTab] = useState(0);
   const queryClient = useQueryClient();
 
 
@@ -296,23 +298,19 @@ export default function FlowsDashboard() {
   });
 
 
-  const workflowTemplates = useMemo(() => prefectDeployments.map(d => ({
-    id: d.id,
-    name: d.name,
-    description: d.description || 'Prefect deployment',
-    lastRun: d.updated,
-  })), [prefectDeployments]);
+  // InitialSyncCompleted gates the one-time full-init button;
+  // window-focus refetches pick the flip up after the flow
+  // completes, without a dedicated poll
+  const { data: systemSettings = {} } = useQuery({
+    queryKey: ['system-settings'],
+    queryFn: async () => (await axios.get('/api/settings', { withCredentials: true })).data,
+  });
 
 
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
-  };
-
-
-  // `ref` is a deployment UUID (template cards) or a name
-  // (shortcut buttons, written before the ids exist). The
-  // loading toast is dismissed by id — a bare toast.dismiss()
-  // would clear unrelated notifications too.
+  // `ref` is a deployment name (the launch buttons know names
+  // before the ids exist); UUIDs still resolve for any future
+  // caller. The loading toast is dismissed by id — a bare
+  // toast.dismiss() would clear unrelated notifications too.
   const triggerWorkflow = async (ref) => {
     const loadingToastId = toast.loading(`Starting workflow...`);
     try {
@@ -357,27 +355,22 @@ export default function FlowsDashboard() {
         <QuickActions
           triggerWorkflow={triggerWorkflow}
           deploymentNames={prefectDeployments.map(d => d.name)}
+          initialSyncCompleted={systemSettings['InitialSyncCompleted'] === '1'}
         />
 
         <DataSourceSettings />
 
         <Paper className="flex-1">
-          <Tabs value={activeTab} onChange={handleTabChange} className="border-b">
-            <Tab label={`Active Workflows ${!runsLoading ? `(${workflowRuns.filter(r => r.status === 'running').length})` : ''}`} />
-            <Tab label={`Templates ${deploymentsLoading ? '' : `(${workflowTemplates.length})`}`} />
-          </Tabs>
+          <Box className="border-b px-4 py-3">
+            <Typography variant="h6">
+              Active Workflows {!runsLoading ? `(${workflowRuns.filter(r => r.status === 'running').length})` : ''}
+            </Typography>
+          </Box>
 
           <Box className="p-4">
-            {activeTab === 0 && (
-              runsLoading
-                ? <PageLoading label="Loading flow runs..." />
-                : <ActiveWorkflows workflowRuns={workflowRuns} />
-            )}
-            {activeTab === 1 && (
-              deploymentsLoading
-                ? <PageLoading label="Loading deployments..." />
-                : <WorkflowTemplates workflowTemplates={workflowTemplates} triggerWorkflow={triggerWorkflow} />
-            )}
+            {runsLoading
+              ? <PageLoading label="Loading flow runs..." />
+              : <ActiveWorkflows workflowRuns={workflowRuns} />}
           </Box>
         </Paper>
       </Box>

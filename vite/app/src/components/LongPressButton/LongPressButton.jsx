@@ -329,9 +329,10 @@ export function LongPressIconButton({
 // progress ring or the caller's `pressedContent`.
 //
 // Used by:
-//   - LongPressDeleteButton (above)
-//   - WorkflowTemplateCard — the "Run Now" button, so a
-//     stray click cannot launch a pipeline
+//   - LongPressDeleteButton (above) — its only consumer
+//     since the Templates tab (WorkflowTemplateCard) was
+//     removed 2026-08; kept for the next hold-to-confirm
+//     action
 // -----------------------------------------------------------
 
 export default function LongPressButton({

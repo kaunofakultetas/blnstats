@@ -1,11 +1,11 @@
 // -----------------------------------------------------------
-//  [*] ActiveWorkflows — the "Active Workflows" tab body
+//  [*] ActiveWorkflows — the runs panel of the dashboard
 //
 //  Despite the name it lists every recent flow run, not only
-//  the running ones — it is the tab label that counts those.
+//  the running ones — the panel header above it counts those.
 //
 //  Used by:
-//    - FlowsDashboard — the first tab
+//    - FlowsDashboard — the runs panel under the cards
 // -----------------------------------------------------------
 
 import { Box } from '@mui/material';
@@ -26,7 +26,7 @@ import WorkflowRunCard from './WorkflowRunCard';
 // workflows" placeholder when the list is empty.
 //
 // Used by:
-//   - FlowsDashboard — the first tab
+//   - FlowsDashboard — the runs panel under the cards
 // -----------------------------------------------------------
 
 export default function ActiveWorkflows({ workflowRuns }) {

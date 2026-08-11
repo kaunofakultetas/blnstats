@@ -3,8 +3,7 @@
 //
 //  Wraps the app in the MUI ThemeProvider with the single
 //  light theme plus CssBaseline. There is no color-mode
-//  state: dark mode was removed by decision (2026-08-11),
-//  matching the control-frontend sibling project. A
+//  state: dark mode was removed by decision (2026-08-11). A
 //  "theme-mode" key may linger in old visitors' localStorage
 //  from the removed switcher — nothing reads it anymore.
 //

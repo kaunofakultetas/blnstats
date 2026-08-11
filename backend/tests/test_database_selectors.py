@@ -27,7 +27,7 @@ import unittest
 import json
 from unittest import skipUnless
 
-from blnstats.database.utils import get_db_connection, create_tables_if_not_exists, get_setting
+from blnstats.database.utils import get_db_connection, create_tables_if_not_exists, get_setting, set_setting
 from blnstats.database.raw_data_selector import RawDataSelector
 from blnstats.database.entity_metrics_selector import EntityMetricsSelector
 from blnstats.calculations.general_stats import GeneralStats
@@ -650,9 +650,33 @@ class TestEntityNameFixer(DBFixture):
 #
 #   test_reads_value_and_default — an existing key returns
 #     its stored string; a missing key returns the default
+#   test_set_setting_round_trip  — the backend-side writer
+#     upserts both fresh and existing keys
 ############################################################
 
 class TestGetSetting(DBFixture):
+
+
+
+
+
+
+    ############################################################
+    # test_set_setting_round_trip
+    ############################################################
+    #
+    # Proves: set_setting creates a missing key and overwrites
+    # an existing one — the exact mechanism
+    # full_initialization_flow uses to flip
+    # InitialSyncCompleted from its seeded '0' to '1'.
+    ############################################################
+
+    def test_set_setting_round_trip(self):
+        set_setting('test-flag', '0')
+        self.assertEqual(get_setting('test-flag'), '0')
+
+        set_setting('test-flag', '1')
+        self.assertEqual(get_setting('test-flag'), '1')
 
 
 

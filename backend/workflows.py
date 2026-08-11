@@ -14,16 +14,19 @@
 #  Served deployments (names must match ACTIONS in the admin
 #  UI's QuickActions.jsx — it triggers runs by these exact
 #  strings):
-#    BLN Analysis Flow             — recalculate everything
 #    LND DBReader Full Update Flow — one import + recalc
-#    Full Initialization Flow      — both imports + recalc
+#    Full Initialization Flow      — both imports + recalc,
+#      one-time: sets InitialSyncCompleted, which greys its
+#      button out in the admin UI
+#  The analysis pipeline itself runs only as a subflow of
+#  these two — it is no longer served on its own.
 ############################################################
 
 
 from prefect import flow, task, serve
 from prefect.schedules import Cron
 import blnstats
-from blnstats.database.utils import get_setting
+from blnstats.database.utils import get_setting, set_setting
 
 
 # The System_Settings key the admin UI's Data Source card
@@ -33,6 +36,13 @@ from blnstats.database.utils import get_setting
 # the same value.
 DBREADER_SOURCE_KEY = 'LND-DBReader-Source-1'
 DBREADER_SOURCE_FALLBACK = 'https://blnstats.knf.vu.lt/rawdata/INPUT/lnd-dbreader-A336EEAB--latest.json.gz'
+
+# Flipped to '1' when full_initialization_flow completes; the
+# admin UI greys its button out on it — the static LNResearch
+# archive only needs importing once, refreshes come from the
+# DBReader update flow. Seeded '0' by database/utils.py and
+# mysql/init.sql.
+INITIAL_SYNC_KEY = 'InitialSyncCompleted'
 
 
 
@@ -415,9 +425,10 @@ def ln_research_import_flow():
 # only surfaced in the Prefect UI.
 #
 # Used by:
-#   - served below as deployment "BLN Analysis Flow"
 #   - lnd_dbreader_full_update_flow (below) — as a subflow
 #   - full_initialization_flow (below) — as a subflow
+#   - no longer served on its own: the admin UI's separate
+#     "Recalculate Statistics" button was removed 2026-08
 ############################################################
 
 @flow
@@ -532,7 +543,10 @@ def lnd_dbreader_full_update_flow(file_path=None):
 # imports, then the full analysis (which itself begins with
 # the blockchain sync). The DBReader dump URL comes from the
 # same System_Settings key the update flow uses, so the
-# admin-set source applies to both.
+# admin-set source applies to both. Completing marks
+# InitialSyncCompleted = '1', which greys the button out in
+# the admin UI — the LNResearch archive is static, so this
+# flow is meant to run ONCE per database.
 #
 # Used by:
 #   - served below as deployment "Full Initialization Flow"
@@ -558,6 +572,12 @@ def full_initialization_flow():
     analysis_results = lightning_network_statistics_flow()
 
 
+    # STEP 4: mark the one-time initialization done — only on
+    # full success (any failed task above raises past this)
+    # ======================================================
+    set_setting(INITIAL_SYNC_KEY, '1')
+
+
     return {
         "ln_research_import": ln_research_import_result,
         "lnd_dbreader_import": lnd_dbreader_import_result,
@@ -576,9 +596,10 @@ def full_initialization_flow():
 ############################################################
 #
 # serve() blocks forever: this is the worker container's
-# entire life. Only these three flows are reachable from the
-# admin UI — the two import-only flows above are not served.
-# The deployment names are the API: QuickActions.jsx in the
+# entire life. Only these two flows are reachable from the
+# admin UI — the import-only flows and the analysis flow are
+# not served (the analysis runs as a subflow of both). The
+# deployment names are the API: QuickActions.jsx in the
 # admin UI triggers runs by these exact strings, so renaming
 # one here silently disables its dashboard button.
 #
@@ -597,7 +618,6 @@ def full_initialization_flow():
 ############################################################
 
 if __name__ == "__main__":
-    ln_stats_deployment = lightning_network_statistics_flow.to_deployment(name="BLN Analysis Flow")
     full_lnd_dbreader_update_deployment = lnd_dbreader_full_update_flow.to_deployment(
         name="LND DBReader Full Update Flow",
         schedules=[Cron("0 4 1 * *", timezone="Europe/Vilnius")],
@@ -605,7 +625,6 @@ if __name__ == "__main__":
     full_pipeline_deployment = full_initialization_flow.to_deployment(name="Full Initialization Flow")
 
     serve(
-        ln_stats_deployment,
         full_lnd_dbreader_update_deployment,
         full_pipeline_deployment
     )

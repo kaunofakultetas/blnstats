@@ -1,19 +1,12 @@
 # Installation specific config files
 docker-compose.yml
 .env
+.claude
+/_OLD
+
 
 # Generated BLN data
-DATA
-
-# MySQL internal data
-mysql/data
-
-# Prefect internal data
-prefect/data
-
-# Documentation dockers not finished yet
-vitepress
-sphinx
+/_DATA
 
 
 # OTHER: Byte-compiled / optimized / DLL files

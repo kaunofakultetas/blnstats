@@ -36,7 +36,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import Divider from '@mui/material/Divider';
-import Paper from '@mui/material/Paper';
 import Tooltip from '@mui/material/Tooltip';
 
 import PushPinIcon from '@mui/icons-material/PushPin';
@@ -256,7 +255,11 @@ function useHoverExpand() {
 // The content-fit expanded width: a ResizeObserver on the
 // invisible ghost copy of the labels recalibrates on new menu
 // items or late-loading fonts. A ghost not laid out yet
-// reports ~0, hence the small-width guard.
+// reports ~0, hence the small-width guard. `measured` turns
+// true on the first real reading — the root keeps the width
+// transition OFF until then, so the correction from the
+// DEFAULT guess to the true width applies instantly instead
+// of playing as a visible settle-slide on every page load.
 //
 // Used by:
 //   - AdminSidebar (below)
@@ -265,6 +268,7 @@ function useHoverExpand() {
 function useContentWidth(ghostRef) {
 
   const [expandedWidth, setExpandedWidth] = useState(DEFAULT_EXPANDED_WIDTH);
+  const [measured, setMeasured] = useState(false);
 
   useEffect(() => {
     const ghost = ghostRef.current;
@@ -274,13 +278,14 @@ function useContentWidth(ghostRef) {
       const labelWidth = entries[0]?.contentRect?.width ?? 0;
       if (labelWidth < 30) return;
       setExpandedWidth(clampWidth(Math.ceil(labelWidth) + LABEL_SURROUND));
+      setMeasured(true);
     });
 
     observer.observe(ghost);
     return () => observer.disconnect();
   }, [ghostRef]);
 
-  return expandedWidth;
+  return { expandedWidth, measured };
 }
 
 
@@ -294,9 +299,12 @@ function useContentWidth(ghostRef) {
 // -----------------------------------------------------------
 //
 // Grey heading above a group of links; on the rail a divider
-// line replaces it so the grouping stays visible. The row
-// keeps the same height either way, so links don't jump while
-// the panel expands.
+// line takes its place so the grouping stays visible. Both
+// stay in the DOM and CROSSFADE on the same 300 ms clock as
+// the panel width — the old conditional swap popped the text
+// in and out mid-animation. The fixed-height row keeps links
+// from jumping while the panel expands, and nowrap keeps the
+// title from re-wrapping at intermediate widths.
 //
 // Used by:
 //   - SidebarLinks (below) — one per section
@@ -304,11 +312,9 @@ function useContentWidth(ghostRef) {
 
 function SectionTitle({ title, open }) {
   return (
-    <div className="mt-[15px] mb-[2px] h-[15px] flex items-center">
-      {open
-        ? <p className="text-[10px] font-bold text-[#999] whitespace-pre-wrap m-0">{title}</p>
-        : <Divider className="w-full" />
-      }
+    <div className="relative mt-[15px] mb-[2px] h-[15px] flex items-center">
+      <p className={`text-[10px] font-bold text-[#999] whitespace-nowrap m-0 transition-opacity duration-300 ${open ? 'opacity-100' : 'opacity-0'}`}>{title}</p>
+      <Divider className={`absolute inset-x-0 top-1/2 transition-opacity duration-300 ${open ? 'opacity-0' : 'opacity-100'}`} />
     </div>
   );
 }
@@ -346,7 +352,7 @@ function MenuItemContent({ icon: Icon, label, open, active }) {
         tooltip: { sx: { backgroundColor: '#000', fontSize: '15px' } },
       }}
     >
-      <div
+      <li
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onClick={() => setHovered(false)}
@@ -355,12 +361,12 @@ function MenuItemContent({ icon: Icon, label, open, active }) {
         // fixed h-[23px] stops rows shifting as the panel opens
         className={`flex items-center h-[23px] py-[3px] pl-[7.5px] pr-[10px] cursor-pointer whitespace-nowrap rounded-[3px] hover:bg-[#999] transition-colors ${active ? 'bg-primary/8' : ''}`}
       >
-        <Icon className="text-[17px]" sx={{ color: 'primary.main' }} />
+        <Icon style={{ fontSize: '17px', color: 'rgb(123, 0, 63)' }} />
         {/* Always in the DOM so the width can be measured and
             the row height stays constant — invisible rather
             than clipped on the rail */}
         <span className={`flex-1 min-w-0 overflow-hidden text-ellipsis text-[13px] leading-[17px] font-semibold ml-[10px] transition-opacity duration-300 ${active ? 'text-primary' : 'text-[rgb(65,65,65)]'} ${open ? 'opacity-100' : 'opacity-0'}`}>{label}</span>
-      </div>
+      </li>
     </Tooltip>
   );
 }
@@ -503,27 +509,33 @@ export default function AdminSidebar() {
 
   const { hovered, onMouseEnter, onMouseLeave } = useHoverExpand();
   const { pinned, togglePinned } = useSidebarPreferences();
-  const expandedWidth = useContentWidth(ghostRef);
+  const { expandedWidth, measured } = useContentWidth(ghostRef);
 
   const activeHref = findActiveHref(pathname);
 
   const open = pinned || hovered;
   const overlaying = open && !pinned;
 
+  // No width animation until the first real measurement:
+  // otherwise the DEFAULT-to-true-width correction plays as a
+  // visible settle-slide on every page load
+  const widthTransition = measured ? 'transition-[width] duration-300 ease-in-out' : '';
+  const panelTransition = measured ? 'transition-[width,box-shadow] duration-300 ease-in-out' : '';
+
   return (
     // The slot — holds the layout space the panel flies out of
     <div
-      className="relative shrink-0 transition-[width] duration-300 ease-in-out"
+      className={`relative shrink-0 ${widthTransition}`}
       style={{ width: pinned ? expandedWidth : RAIL_WIDTH }}
     >
-      {/* Paper rather than a plain div so the surface follows
-          the theme's background.paper */}
-      <Paper
-        square
-        elevation={0}
+      {/* The panel — a plain white div, NOT a MUI Paper: Paper
+          injects its own `transition: box-shadow ...` shorthand
+          from emotion, which raced the width transition and
+          made hover-open snap instead of slide */}
+      <div
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
-        className={`absolute inset-y-0 left-0 z-40 border-r border-gray-200 overflow-y-auto overflow-x-hidden transition-[width,box-shadow] duration-300 ease-in-out ${overlaying ? 'shadow-[4px_0_20px_rgba(0,0,0,0.25)]' : ''}`}
+        className={`absolute inset-y-0 left-0 z-40 border-r border-gray-200 bg-white overflow-y-auto overflow-x-hidden ${panelTransition} ${overlaying ? 'shadow-[4px_0_20px_rgba(0,0,0,0.25)]' : ''}`}
         style={{ width: open ? expandedWidth : RAIL_WIDTH }}
       >
         {/* Ghost measurer — an invisible, zero-height copy of
@@ -536,10 +548,12 @@ export default function AdminSidebar() {
         </div>
 
         <nav className="px-[10px]">
-          <PinButton pinned={pinned} onToggle={togglePinned} />
-          <SidebarLinks open={open} activeHref={activeHref} />
+          <ul className="list-none m-0 p-0">
+            <PinButton pinned={pinned} onToggle={togglePinned} />
+            <SidebarLinks open={open} activeHref={activeHref} />
+          </ul>
         </nav>
-      </Paper>
+      </div>
     </div>
   );
 }
