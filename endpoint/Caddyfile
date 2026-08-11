@@ -116,7 +116,7 @@
 
 
         # NextJS
-        reverse_proxy /* blnstats-nextjs:3000
+        reverse_proxy /* blnstats-vite:80
 
         
     }

@@ -1,9 +1,0 @@
-FROM node:24.13
-
-WORKDIR /app
-
-
-
-ENV PORT 3000
-EXPOSE 3000
-CMD ["sh", "-lc", "npm install && npm run dev"]
