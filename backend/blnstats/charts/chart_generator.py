@@ -157,13 +157,13 @@ class BaseChartGenerator:
     #
     # Chooses which x positions get ticks: an explicit
     # x_ticks list wins; otherwise dates whose YYYY-MM-DD
-    # form ends with ends_with are kept; exclusion alone
-    # filters the full date series. exclude_ends_with thins
-    # crowded month labels BEFORE the first/last data
-    # points are forced back in, so the endpoints always
-    # survive and the axis shows its true extent (the
-    # series-start label used to vanish whenever it matched
-    # an exclusion pattern).
+    # form ends with ends_with are kept, with the first and
+    # last data points forced in; exclusion alone filters
+    # the full date series. exclude_ends_with runs LAST, on
+    # top of the forced endpoints — deliberately, so a
+    # crowded endpoint label can be thinned away like any
+    # other (an unconditional endpoint label sits right next
+    # to its neighbour and the two texts overlap).
     #
     # Used by:
     #   - generateCoefficientCharts,
@@ -179,11 +179,6 @@ class BaseChartGenerator:
     def set_x_ticks(self, ends_with=None, x_ticks=None, exclude_ends_with=None):
         if x_ticks:
             self.x_ticks = x_ticks
-            if exclude_ends_with:
-                self.x_ticks = [
-                    date for date in self.x_ticks
-                    if not any(date.strftime('%Y-%m-%d').endswith(pattern) for pattern in exclude_ends_with)
-                ]
 
         elif ends_with:
             self.x_ticks = [
@@ -191,15 +186,9 @@ class BaseChartGenerator:
                 if date.strftime('%Y-%m-%d').endswith(ends_with)
             ]
 
-            if exclude_ends_with:
-                self.x_ticks = [
-                    date for date in self.x_ticks
-                    if not any(date.strftime('%Y-%m-%d').endswith(pattern) for pattern in exclude_ends_with)
-                ]
-
-            # First/last data points are forced in AFTER the
-            # exclusion pass so the axis always shows its true
-            # extent
+            # First/last data points are forced in BEFORE the
+            # exclusion below, so a crowded endpoint label can
+            # still be thinned away like any other
             if self.x_data[0] not in self.x_ticks:
                 self.x_ticks.insert(0, self.x_data[0])
 
@@ -207,10 +196,14 @@ class BaseChartGenerator:
                 self.x_ticks.append(self.x_data[-1])
 
         elif exclude_ends_with:
-            # exclusion without a prior selection acts on the
-            # full date series
+            # exclusion without a prior selection starts from
+            # the full date series
+            self.x_ticks = list(self.x_data)
+
+        # Runs on top of whichever branch above filled x_ticks
+        if exclude_ends_with:
             self.x_ticks = [
-                date for date in self.x_data
+                date for date in self.x_ticks
                 if not any(date.strftime('%Y-%m-%d').endswith(pattern) for pattern in exclude_ends_with)
             ]
 
@@ -641,9 +634,8 @@ class LorenzCurveChartGenerator(BaseChartGenerator):
                 plt.plot(percentiles, cumulative_percentages, label=label)
 
 
-            # STEP 4: fixed 0-100 percent axes, staged then
-            # applied
-            # =============================================
+            # STEP 4: fixed 0-100 percent axes, staged then applied
+            # =====================================================
             self.customize_axes(
                 x_label=self.x_label,
                 y_label=self.y_label,

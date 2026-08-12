@@ -43,7 +43,7 @@ DATES = [datetime(2018, 2, 1), datetime(2018, 3, 1), datetime(2018, 4, 1)]
 #   test_explicit_ticks_win
 #   test_customize_axes_x_ticks_stored
 #   test_exclude_only_filters_full_series
-#   test_exclusion_keeps_forced_endpoints
+#   test_exclusion_may_thin_forced_endpoints
 ############################################################
 
 class TestTickSelection(unittest.TestCase):
@@ -144,20 +144,21 @@ class TestTickSelection(unittest.TestCase):
 
 
     ############################################################
-    # test_exclusion_keeps_forced_endpoints
+    # test_exclusion_may_thin_forced_endpoints
     ############################################################
     #
-    # Proves: the first/last data points are forced in AFTER
-    # the exclusion pass, so the axis always shows its true
-    # extent. This fires in production —
-    # generateCoefficientsOnSingleChart excludes '-02-01'
-    # while its series starts 2018-02-01, and that start label
-    # used to vanish from every published chart.
+    # Proves: exclusion runs LAST, on top of the forced
+    # first/last ticks — deliberate (reverted 2026-08): an
+    # unconditional endpoint label lands right next to its
+    # neighbour on the axis and the two texts overlap, so a
+    # crowded endpoint must be thinnable like any other tick.
+    # Production relies on it: generateCoefficientsOnSingleChart
+    # excludes '-02-01' while its series starts 2018-02-01.
     ############################################################
 
-    def test_exclusion_keeps_forced_endpoints(self):
+    def test_exclusion_may_thin_forced_endpoints(self):
         self.gen.set_x_ticks(ends_with='-03-01', exclude_ends_with=['-02-01'])
-        self.assertEqual(self.gen.x_ticks, DATES)  # match + both endpoints back in
+        self.assertEqual(self.gen.x_ticks, [DATES[1], DATES[2]])  # forced 02-01 thinned away, forced last kept
 
 
 
